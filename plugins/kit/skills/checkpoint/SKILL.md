@@ -15,7 +15,7 @@ Updates the project's state files so the next session starts from where this one
 
 This conversation's session id is `${CLAUDE_SESSION_ID}`.
 1. Read its start record, `state/.sessions/${CLAUDE_SESSION_ID}.json` (JSON with `session_id`, `started`, `source`, `code_head`, `paper_head`). The SessionStart hook writes it once per conversation and never rewrites it.
-2. If the record is missing, or its `session_id` differs from `${CLAUDE_SESSION_ID}`, stop and report both ids, together with the latest id in `state/.session_id`. Don't guess.
+2. If the record is missing, or its `session_id` differs from `${CLAUDE_SESSION_ID}`, stop and report both ids, together with the latest id in `state/.session_id`. Don't guess. A missing record usually means session start's git checks ran out of time: `state/.hook.log` then has an `ERROR session id` line. Say so; the next resume or compaction writes the record, and its commit list starts there (step 3).
 3. If `source` is not `startup` or `clear`, the record was first written when this conversation was resumed or compacted, so its commit list starts at `started`, not at the conversation's real start. Say so in the entry.
 4. List this session's commits in each repo:
    ```
