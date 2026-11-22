@@ -1,0 +1,16 @@
+# research-kit project config (spec §4.1). Every key is required.
+paper_dir: paper
+paper_branch: main
+# languages: r and/or python, in the order their numbers scripts run. packages: {} when there is none.
+languages: {{LANGUAGES}}
+packages: {{PACKAGES}}
+numbers_tex: paper/generated/numbers.tex
+notation_tex: paper/generated/notation.tex
+venue: undecided
+lint:
+  paper:
+    globs: ["*.tex", "sections/**/*.tex"]   # root .tex files and any depth under sections/; generated/ and tables/ are excluded
+    baseline: .lint_baseline
+  slides:
+    globs: ["slides/*/*.tex"]
+    baseline: .lint_baseline_slides

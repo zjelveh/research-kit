@@ -1,0 +1,98 @@
+#!/bin/sh
+# research-kit launcher (shareable-kit spec §3): runs the kit's scripts with the kit's Python.
+#   kit <script>.py [args]             a script from the plugin's scripts/
+#   kit which|customize <item> [name]  the personal layer (spec §2); kit where: the personal folder
+#   kit python [args]                  the kit's Python itself
+#   kit setup                          create the Python environment if needed, and the stable path
+#   kit session-start                  the SessionStart hook
+set -u
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P) || exit 2
+plugin=${here%/bin}
+if [ -n "${KIT_DATA_DIR:-}" ]; then
+    data=$KIT_DATA_DIR
+else
+    case ${XDG_DATA_HOME:-} in   # a relative XDG path is ignored
+        /*) data=$XDG_DATA_HOME/research-kit ;;
+        *) data=${HOME:-}/.local/share/research-kit ;;
+    esac
+fi
+venv=${KIT_VENV:-$data/venv}
+py=$venv/bin/python
+bad=
+case $data in /*) ;; *) bad="KIT_DATA_DIR must be an absolute path: $data" ;; esac
+case $venv in /*) ;; *) bad="KIT_VENV must be an absolute path: $venv" ;; esac
+
+env_ok() { [ -z "$bad" ] && [ -x "$py" ] && "$py" -c 'import yaml' >/dev/null 2>&1; }
+
+kit_project() {  # is $1, or a folder above it, a kit project? Symlinks are resolved first, as find_project does.
+    d=$(CDPATH= cd -- "$1" 2>/dev/null && pwd -P) || return 1
+    while :; do
+        [ -f "$d/.claude/research.yml" ] && return 0
+        [ "$d" = / ] && return 1
+        d=$(dirname -- "$d")
+    done
+}
+
+drain() { [ -t 0 ] || cat >/dev/null; }   # the hook's JSON on stdin, unused on these paths
+
+need_env() {
+    [ -z "$bad" ] || { echo "kit: $bad" >&2; exit 2; }
+    env_ok && return 0
+    echo "kit: the kit's Python environment ($venv) is missing or broken; run: \"$plugin/bin/kit\" setup" >&2
+    exit 2
+}
+
+cmd=${1:-}
+[ $# -gt 0 ] && shift
+case $cmd in
+setup)
+    [ -z "$bad" ] || { echo "kit setup: $bad" >&2; exit 2; }
+    if ! env_ok; then
+        if [ -e "$venv" ] || [ -L "$venv" ]; then
+            echo "kit setup: $venv exists but its Python cannot import yaml; remove it and rerun" >&2
+            exit 2
+        fi
+        command -v uv >/dev/null 2>&1 || {
+            echo "kit setup: uv is not on the PATH; install it (https://docs.astral.sh/uv/) and rerun" >&2
+            exit 2
+        }
+        mkdir -p -- "$(dirname -- "$venv")" &&
+            uv venv --quiet --python '>=3.12' "$venv" &&
+            uv pip install --quiet --python "$py" -r "$plugin/requirements.txt" || {
+            rm -rf -- "$venv"   # it did not exist above, so this removes only the half-made one; a rerun starts clean
+            echo "kit setup: creating $venv failed" >&2
+            exit 2
+        }
+    fi
+    exec "$py" "$plugin/scripts/stable_path.py" ;;
+session-start)
+    if ! kit_project "$PWD" && ! kit_project "${CLAUDE_PROJECT_DIR:-/}"; then
+        drain
+        exit 0
+    fi
+    if ! env_ok; then
+        drain
+        if [ -n "$bad" ]; then
+            msg=$bad
+        else
+            msg="the kit's Python environment ($venv) is missing; run: \"$plugin/bin/kit\" setup"
+        fi
+        printf '%s\n%s\n' "=== research-kit session context ===" "ERROR research-kit: $msg"
+        exit 0
+    fi
+    exec "$py" "$plugin/scripts/session_start.py" ;;
+which|customize|where)
+    need_env
+    exec "$py" "$plugin/scripts/personal.py" "$cmd" "$@" ;;
+python)
+    need_env
+    exec "$py" "$@" ;;
+*.py)
+    case $cmd in */*) echo "kit: give a script name, not a path: $cmd" >&2; exit 2 ;; esac
+    [ -f "$plugin/scripts/$cmd" ] || { echo "kit: no script $cmd in $plugin/scripts" >&2; exit 2; }
+    need_env
+    exec "$py" "$plugin/scripts/$cmd" "$@" ;;
+*)
+    echo "usage: kit setup | session-start | which|customize <item> [name] | where | python [args] | <script>.py [args]" >&2
+    exit 2 ;;
+esac

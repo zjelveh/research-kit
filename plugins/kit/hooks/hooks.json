@@ -1,0 +1,17 @@
+{
+  "description": "research-kit SessionStart context (spec §5.1); silent outside kit projects (shareable-kit spec §3).",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/kit\" session-start",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

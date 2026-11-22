@@ -1,0 +1,6 @@
+# Kit-wide limits for the session-start context, in bytes, set from a measurement of Claude Code's hook output (October 2026).
+hook_budget_bytes: 7372
+rules_cap_bytes: 1536
+reserve_bytes: 1024
+min_state_bytes: 2048
+channel: stdout   # additional_context carried the same 9 KB in that measurement

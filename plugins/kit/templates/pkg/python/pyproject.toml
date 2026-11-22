@@ -1,0 +1,10 @@
+[project]
+name = "{{PYPKG}}"
+version = "0.0.1"
+description = "Method package for {{PROJECT}}"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.9.25,<0.10.0"]
+build-backend = "uv_build"

@@ -1,0 +1,9 @@
+# The paper's Python analysis environment (not a package). Add dependencies with `uv add <name>`.
+[project]
+name = "{{ANALYSIS_DIST}}"
+version = "0"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+package = false

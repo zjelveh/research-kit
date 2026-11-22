@@ -1,0 +1,37 @@
+\documentclass[aspectratio=169,11pt]{beamer}
+\usetheme{default}
+\usepackage[T1]{fontenc}
+\usepackage[default]{lato}
+\definecolor{kitblue}{RGB}{0,114,178}
+\setbeamercolor{structure}{fg=kitblue}
+\setbeamercolor{frametitle}{fg=kitblue}
+\setbeamercolor{title}{fg=kitblue}
+\setbeamertemplate{itemize items}[circle]
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}[frame number]
+\setbeamerfont{frametitle}{series=\bfseries}
+\usepackage{booktabs}
+\usepackage{graphicx}
+% Paths to the paper, filled in by `scaffold.py new-talk` from .claude/research.yml.
+\graphicspath{{{{FIGURES}}/}}
+\input{{{NUMBERS_TEX}}}
+\input{{{NOTATION_TEX}}}
+\newcommand{\papertables}{{{TABLES}}}
+
+\title{TALK TITLE}
+\author{AUTHOR}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\begin{frame}{FRAME TITLE}
+  \begin{itemize}
+    \item Every number is a macro from the paper's generated files.
+  \end{itemize}
+\end{frame}
+
+\end{document}

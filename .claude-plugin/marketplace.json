@@ -1,0 +1,12 @@
+{
+  "name": "research-kit",
+  "description": "A Claude Code plugin for empirical research papers.",
+  "owner": { "name": "zjelveh" },
+  "plugins": [
+    {
+      "name": "kit",
+      "source": "./plugins/kit",
+      "description": "Research workflow for empirical papers: session state, notes, literature, generated numbers, writing, slides and code review."
+    }
+  ]
+}

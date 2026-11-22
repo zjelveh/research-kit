@@ -1,0 +1,10 @@
+Package: {{RPKG}}
+Title: What the Package Does (One Line, Title Case)
+Version: 0.0.0.9000
+Authors@R: person("{{GIT_NAME}}", email = "{{GIT_EMAIL}}", role = c("aut", "cre"))
+Description: What the package does (one paragraph).
+License: GPL (>= 3)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Suggests: testthat (>= 3.0.0)
+Config/testthat/edition: 3

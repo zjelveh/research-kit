@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary_markdown", "findings", "verified", "not_checked"],
+  "properties": {
+    "summary_markdown": {"type": "string"},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "severity", "category", "file", "line", "claim", "evidence", "suggested_fix"],
+        "properties": {
+          "id": {"type": "string"},
+          "severity": {"type": "string", "enum": ["high", "medium", "low"]},
+          "category": {"type": "string", "enum": ["code bug", "wrong number", "reasoning error", "overclaim", "test gap"]},
+          "file": {"type": "string"},
+          "line": {"type": ["integer", "null"]},
+          "claim": {"type": "string"},
+          "evidence": {"type": "string"},
+          "suggested_fix": {"type": "string"}
+        }
+      }
+    },
+    "verified": {"type": "array", "items": {"type": "string"}},
+    "not_checked": {"type": "array", "items": {"type": "string"}}
+  }
+}

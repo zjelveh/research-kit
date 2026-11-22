@@ -1,0 +1,3 @@
+#!/bin/sh
+# research-kit numbers gate (spec §5.5). Installed by scaffold.py; do not edit.
+exec "{{KIT}}" lint_numbers.py --project "{{PROJECT_DIR}}" --gate {{GATE}} --precommit
