@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from kitlib import PLUGIN_ROOT, KitError, git, read_env  # noqa: E402
+from kitlib import PLUGIN_ROOT, GitTimeout, KitError, git, git_timeout, read_env, time_left  # noqa: E402
 
 CODE_EXT = {".R", ".r", ".Rmd", ".qmd", ".py", ".sh", ".sql", ".stan", ".jl", ".do"}
 TEMPLATES = PLUGIN_ROOT / "templates" / "review"
@@ -143,10 +143,16 @@ def worktree_blob(project: Path, path: str) -> str | None:
     f = project / path
     try:
         if f.is_symlink():
-            proc = subprocess.run(["git", "-C", str(project), "hash-object", "--stdin"],
-                                  input=os.fsencode(os.readlink(f)), capture_output=True)
+            timeout = time_left()
+            try:
+                proc = subprocess.run(["git", "-C", str(project), "hash-object", "--stdin"],
+                                      input=os.fsencode(os.readlink(f)), capture_output=True, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                raise git_timeout("git hash-object --stdin", project, timeout) from None
             return proc.stdout.decode().strip() if proc.returncode == 0 else None
         return git(project, "hash-object", "--", path).strip()
+    except GitTimeout:
+        raise
     except (OSError, KitError):
         return None
 

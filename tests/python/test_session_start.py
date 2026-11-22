@@ -4,16 +4,20 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+import pytest
 
 from build_fixture import bare_overleaf, web_edit, write
 from review_fixture import fake_review
 from scaffold import cmd_attach, cmd_new
-from session_start import KIT_SCRIPTS, build_context
+from kitlib import GitTimeout, git_deadline
+from session_start import KIT_SCRIPTS, build_context, record_session
 
 MAIN = "\\documentclass{article}\n\\begin{document}\nHello.\n\\end{document}\n"
 LIMITS = {"hook_budget_bytes": 8000, "rules_cap_bytes": 1536, "reserve_bytes": 1024,
-          "min_state_bytes": 2048, "channel": "stdout"}
+          "min_state_bytes": 2048, "git_budget_seconds": 20, "channel": "stdout"}
 RULES = "# rules\n- fail hard\n"
 
 
@@ -43,6 +47,7 @@ def test_normal_session(tmp_path):
     assert "numbers (paper working tree): ok" in out
     assert "numbers (paper origin): ok" in out
     assert "numbers (slides working tree): ok" in out
+    assert "out of time" not in out
 
 
 def test_over_budget_names_state_and_omits_it(tmp_path):
@@ -354,3 +359,65 @@ def test_the_stable_path_is_repointed_even_when_the_hook_input_is_bad(tmp_path, 
     session_start.main()
     assert "hook crashed" in capsys.readouterr().out
     assert link.resolve() == PLUGIN_ROOT.resolve()
+
+
+def test_a_slow_git_still_lets_the_rules_and_state_through(tmp_path, monkeypatch):
+    """A git that hangs walking the tree (status, ls-files) uses up the budget: the hook still returns in
+    time with the rules and the state, and says which checks were skipped."""
+    p, _ = attached(tmp_path)
+    real = shutil.which("git")
+    fake = write(tmp_path / "bin" / "git",
+                 '#!/bin/sh\nfor a in "$@"; do case "$a" in status|ls-files) exec sleep 30;; esac; done\n'
+                 f'exec "{real}" "$@"\n')
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake.parent}{os.pathsep}{os.environ['PATH']}")
+    start = time.monotonic()
+    out = build_context(p, {"session_id": "s1"}, {**LIMITS, "git_budget_seconds": 2}, RULES)
+    assert time.monotonic() - start < 10
+    assert "- fail hard" in out and (p / "state" / "CURRENT_STATE.md").read_text().rstrip() in out
+    status = out.split("--- status ---\n")[1].splitlines()
+    assert status[0].startswith("ERROR git checks: out of time (2s)") and out.count("out of time") == 1
+    # the paper's git status runs first and uses up the budget, unless a slow machine ends it earlier
+    assert any(line.startswith("ERROR code repo:") and ("skipped" in line or "stopped" in line) for line in status)
+    assert "ERROR paper is not a git repo" not in out
+
+
+def slow_status_in(repo, tmp_path, monkeypatch):
+    """A `git` first on PATH whose `status` hangs in `repo` (told apart by its -C) and works elsewhere."""
+    real = shutil.which("git")
+    fake = write(tmp_path / "bin" / "git",
+                 f'#!/bin/sh\nif [ "$1" = -C ] && [ "$2" = "{repo}" ]; then\n'
+                 '  for a in "$@"; do [ "$a" = status ] && exec sleep 30; done\nfi\n'
+                 f'exec "{real}" "$@"\n')
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake.parent}{os.pathsep}{os.environ['PATH']}")
+
+
+def test_a_slow_code_repo_leaves_time_for_overleaf(tmp_path, monkeypatch):
+    """The paper's checks run before the code repo's, so a hanging code repo can't starve the Overleaf
+    check. The lines keep their usual order, after the out-of-time line."""
+    p, bare = attached(tmp_path)
+    web_edit(tmp_path, bare, "main.tex", MAIN.replace("Hello.", "We saw 42 cases."))
+    slow_status_in(p.resolve(), tmp_path, monkeypatch)
+    start = time.monotonic()
+    out = build_context(p, {}, {**LIMITS, "git_budget_seconds": 3}, RULES)
+    assert time.monotonic() - start < 10
+    status = out.split("--- status ---\n")[1].splitlines()
+    assert status[0].startswith("ERROR git checks: out of time (3s)") and out.count("out of time") == 1
+    overleaf = status.index("Overleaf: 1 new commits — pull before editing")
+    assert "NUMBERS LINT REGRESSION (paper origin): 1 > 0" in status
+    code = next(i for i, line in enumerate(status) if line.startswith("ERROR code repo:"))
+    assert status[code].endswith("stopped: session start's 3s for git checks ran out")
+    paper = next(i for i, line in enumerate(status) if line.startswith("paper: 0 uncommitted"))
+    assert code < paper < overleaf
+
+
+def test_the_session_id_is_written_before_git_runs(tmp_path):
+    """A record needs both heads, so a timeout leaves none (checkpoint then reports the ids), but the
+    latest id is already in state/.session_id."""
+    p = cmd_new("demo", tmp_path, ["r"])
+    with git_deadline(0):
+        with pytest.raises(GitTimeout):
+            record_session(p, p / "paper", "s9", "startup")
+    assert (p / "state" / ".session_id").read_text() == "s9\n"
+    assert not (p / "state" / ".sessions" / "s9.json").exists()

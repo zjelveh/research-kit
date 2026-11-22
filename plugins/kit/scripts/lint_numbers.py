@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from kitlib import KitError, git, glob_to_regex, load_config  # noqa: E402
+from kitlib import KitError, git, git_timeout, glob_to_regex, load_config, time_left  # noqa: E402
 
 # =====================================================================================
 # Policy: what is never linted. This is the authoritative list; extending it is a kit edit.
@@ -892,7 +892,11 @@ def _read_worktree(repo: Path, p: Path) -> str:
 
 def _show(repo: Path, spec: str) -> str:
     """`git show <spec>` read as bytes and decoded as strict UTF-8."""
-    proc = subprocess.run(["git", "-C", str(repo), "show", spec], capture_output=True)
+    timeout = time_left()
+    try:
+        proc = subprocess.run(["git", "-C", str(repo), "show", spec], capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise git_timeout(f"git show {spec}", repo, timeout) from None
     if proc.returncode != 0:
         raise KitError(f"{repo}: git show {spec} failed: "
                        f"{proc.stderr.decode('utf-8', 'replace').strip()}")

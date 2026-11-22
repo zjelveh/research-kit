@@ -1,6 +1,6 @@
 {
   "name": "kit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Research workflow for empirical papers: session state, notes, literature, generated numbers, writing, slides and code review.",
   "author": { "name": "zjelveh" },
   "repository": "https://github.com/zjelveh/research-kit",

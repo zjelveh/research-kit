@@ -6,6 +6,8 @@ import keyword
 import os
 import re
 import subprocess
+import time
+import types
 from pathlib import Path
 
 import yaml
@@ -25,13 +27,18 @@ REQUIRED_CONFIG_KEYS = CONFIG_STR_KEYS + CONFIG_LIST_KEYS + ("languages", "packa
 LANGUAGES = ("r", "python")
 R_PKG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9.]*[A-Za-z0-9]$")
 PY_PKG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-LIMIT_INT_KEYS = ("hook_budget_bytes", "rules_cap_bytes", "reserve_bytes", "min_state_bytes")
+LIMIT_INT_KEYS = ("hook_budget_bytes", "rules_cap_bytes", "reserve_bytes", "min_state_bytes",
+                  "git_budget_seconds")
 REQUIRED_LIMIT_KEYS = ("hook_budget_bytes", "rules_cap_bytes", "reserve_bytes",
-                       "min_state_bytes", "channel")
+                       "min_state_bytes", "git_budget_seconds", "channel")
 
 
 class KitError(Exception):
     """A fail-hard error whose message is meant for the user."""
+
+
+class GitTimeout(KitError):
+    """A git call ran past its time limit, or the session-start budget was used up."""
 
 
 def _get(data: dict, dotted: str):
@@ -228,13 +235,64 @@ def read_env() -> dict:
     return {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
 
 
+_deadlines = []   # the active git_deadline records, outermost first
+
+
+@contextlib.contextmanager
+def git_deadline(seconds: float):
+    """Inside, all git calls together must finish within `seconds`. Yields a record whose `timed_out` is set
+    when the deadline stopped or skipped a call. Session start uses it so its output arrives even when git
+    is slow. A nested deadline can only shorten the one around it."""
+    end = time.monotonic() + seconds
+    if _deadlines:
+        end = min(end, _deadlines[-1].end)
+    record = types.SimpleNamespace(timed_out=False, end=end, seconds=seconds)
+    _deadlines.append(record)
+    try:
+        yield record
+    finally:
+        _deadlines[:] = [d for d in _deadlines if d is not record]   # by identity, even if exits interleave
+
+
+def _passed_deadline():
+    """Marks every active deadline that has passed, and returns the outermost of them (None if none has)."""
+    now = time.monotonic()
+    passed = [d for d in _deadlines if now >= d.end]
+    for d in passed:
+        d.timed_out = True
+    return passed[0] if passed else None
+
+
+def time_left(timeout: float | None = None) -> float | None:
+    """The timeout for the next git call: `timeout`, cut to what is left of the deadline if one is set."""
+    if not _deadlines:
+        return timeout
+    remaining = _deadlines[-1].end - time.monotonic()
+    if remaining <= 0:
+        _passed_deadline()
+        raise GitTimeout("skipped: session start's time limit for git checks was used up")
+    return remaining if timeout is None else min(timeout, remaining)
+
+
+def git_timeout(command: str, repo: Path, timeout: float) -> GitTimeout:
+    """The error for `command` (a git command line) stopped by its `timeout` in `repo`. When the deadline
+    stopped it, the message names the budget; a call stopped by its own shorter timeout (fetch's) marks no
+    record, since nothing later is skipped."""
+    passed = _passed_deadline()
+    if passed:
+        return GitTimeout(f"{command} in {repo} stopped: session start's {passed.seconds:g}s for git checks "
+                          "ran out")
+    return GitTimeout(f"{command} timed out after {timeout:g}s in {repo}")
+
+
 def git(repo: Path, *args: str, timeout: float | None = None, check: bool = True,
         env: dict | None = None) -> str:
+    timeout = time_left(timeout)
     try:
         proc = subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
                               text=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
-        raise KitError(f"git {' '.join(args)} timed out after {timeout}s in {repo}") from None
+        raise git_timeout(f"git {' '.join(args)}", repo, timeout) from None
     if check and proc.returncode != 0:
         msg = proc.stderr.strip() or proc.stdout.strip()
         raise KitError(f"git {' '.join(args)} failed in {repo}: {msg}")

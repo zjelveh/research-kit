@@ -16,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import lint_numbers  # noqa: E402
 import codex_review  # noqa: E402
 from check_state_size import allotment  # noqa: E402
-from kitlib import (KitError, atomic_write, find_project, git, in_effect, link_stable, load_config,  # noqa: E402
-                    load_limits, read_env)
+from kitlib import (GitTimeout, KitError, atomic_write, find_project, git, git_deadline, in_effect,  # noqa: E402
+                    link_stable, load_config, load_limits, read_env)
 
 KIT_SCRIPTS = Path(__file__).resolve().parent
 HEADER = "=== research-kit session context ==="
@@ -98,6 +98,8 @@ def cap_lines(lines: list[str], reserve: int) -> list[str]:
 def paper_is_own_repo(paper: Path) -> bool:
     try:
         top = git(paper, "rev-parse", "--show-toplevel").strip()
+    except GitTimeout:
+        raise
     except STEP_ERRORS:
         return False
     return Path(top).resolve() == paper.resolve()
@@ -114,9 +116,12 @@ def record_session(project: Path, paper: Path, session_id: str, source: str | No
     """Write state/.session_id (the latest conversation), and state/.sessions/<id>.json once per
     conversation: the start time, how it started, and both repos' HEAD, so /kit:checkpoint can list
     that conversation's commits. An existing record is never rewritten, so a resume or compaction
-    (even after other conversations ran) keeps its original start."""
+    (even after other conversations ran) keeps its original start. The id is written before git runs:
+    when git times out there is no record, and /kit:checkpoint reports the id instead of guessing."""
     if not SESSION_ID_RE.fullmatch(session_id):
         raise KitError(f"unexpected session id {session_id!r}; no session record written")
+    (project / "state").mkdir(exist_ok=True)
+    (project / "state" / ".session_id").write_text(f"{session_id}\n", encoding="utf-8")   # no shared temp file: two sessions may start at once
     rec = project / "state" / ".sessions" / f"{session_id}.json"
     if not rec.is_file():
         start = {"session_id": session_id,
@@ -125,7 +130,27 @@ def record_session(project: Path, paper: Path, session_id: str, source: str | No
                  "code_head": repo_head(project),
                  "paper_head": repo_head(paper) if paper.is_dir() and paper_is_own_repo(paper) else None}
         atomic_write(rec, json.dumps(start, indent=2) + "\n")
-    (project / "state" / ".session_id").write_text(f"{session_id}\n", encoding="utf-8")
+
+
+def paper_lines(project: Path, cfg: dict, paper: Path) -> list[str]:
+    """The paper's status lines, in their usual order. Overleaf's checks (fetch, then the origin lint) run
+    before the paper's tree walk, so a slow tree uses up the git budget last."""
+    if not paper.is_dir():
+        return ["paper not attached — run scaffold.py attach-paper"]
+    worktree = lint_status(project, cfg, "paper", "worktree", "paper working tree")
+    try:
+        own = paper_is_own_repo(paper)
+    except GitTimeout as e:
+        return [f"ERROR paper repo: {e}", worktree]
+    if not own:
+        return [f"ERROR paper is not a git repo: {paper}", worktree]
+    fetch = fetch_status(paper, cfg["paper_branch"])
+    origin = lint_status(project, cfg, "paper", f"origin/{cfg['paper_branch']}", "paper origin")
+    try:
+        repo = repo_status("paper", paper)
+    except STEP_ERRORS as e:
+        repo = f"ERROR paper repo: {e}"
+    return [repo, fetch, worktree, origin]
 
 
 def build_context(cwd: Path, hook_input: dict, limits: dict, rules: str | None, rules_note: str | None = None) -> str:
@@ -163,36 +188,28 @@ def build_context(cwd: Path, hook_input: dict, limits: dict, rules: str | None, 
     except STEP_ERRORS as e:
         status.append(f"ERROR state: {e}")
     paper = project / cfg["paper_dir"]
-    if hook_input.get("session_id"):
-        try:
-            record_session(project, paper, hook_input["session_id"], hook_input.get("source"))
-        except STEP_ERRORS as e:
-            status.append(f"ERROR session id: {e}")
-    try:
-        status.append(repo_status("code", project))
-    except STEP_ERRORS as e:
-        status.append(f"ERROR code repo: {e}")
-    try:
-        line = codex_review.review_status(project)
-        if line:
-            status.append(line)
-    except STEP_ERRORS as e:
-        status.append(f"ERROR review status: {e}")
-    if paper.is_dir():
-        if paper_is_own_repo(paper):
+    with git_deadline(limits["git_budget_seconds"]) as budget:
+        if hook_input.get("session_id"):
             try:
-                status.append(repo_status("paper", paper))
+                record_session(project, paper, hook_input["session_id"], hook_input.get("source"))
             except STEP_ERRORS as e:
-                status.append(f"ERROR paper repo: {e}")
-            status.append(fetch_status(paper, cfg["paper_branch"]))
-        else:
-            status.append(f"ERROR paper is not a git repo: {paper}")
-        status.append(lint_status(project, cfg, "paper", "worktree", "paper working tree"))
-        if paper_is_own_repo(paper):
-            status.append(lint_status(project, cfg, "paper", f"origin/{cfg['paper_branch']}", "paper origin"))
-    else:
-        status.append("paper not attached — run scaffold.py attach-paper")
-    status.append(lint_status(project, cfg, "slides", "worktree", "slides working tree"))
+                status.append(f"ERROR session id: {e}")
+        paper_part = paper_lines(project, cfg, paper)   # before the code repo's tree walk, shown after it
+        try:
+            status.append(repo_status("code", project))
+        except STEP_ERRORS as e:
+            status.append(f"ERROR code repo: {e}")
+        try:
+            line = codex_review.review_status(project)
+            if line:
+                status.append(line)
+        except STEP_ERRORS as e:
+            status.append(f"ERROR review status: {e}")
+        status += paper_part
+        status.append(lint_status(project, cfg, "slides", "worktree", "slides working tree"))
+    if budget.timed_out:   # first, so cap_lines never moves it to the log
+        status.insert(0, f"ERROR git checks: out of time ({limits['git_budget_seconds']}s), so some status lines "
+                         "are missing; a large untracked folder slows git, so add it to .gitignore")
     log = project / "state" / ".hook.log"
     try:
         with log.open("a", encoding="utf-8") as fh:

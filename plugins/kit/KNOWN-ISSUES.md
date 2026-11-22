@@ -70,7 +70,9 @@ These are rare edge cases that have been accepted rather than fixed. The bar for
 ## SessionStart hook (`session_start.py`)
 
 - With more than about three ERROR lines at once, later priority lines go to `state/.hook.log`. The injected text says how many were moved there.
-- `git status -uall` has no timeout. A very large untracked tree could slow session start, and the hook's 30-second timeout would then drop all output.
+- Session start gives its git checks 20 seconds in all (`git_budget_seconds` in `limits.yml`). In a very large untracked tree, the status lines that didn't finish in time are reported as skipped, and the rules and current state still load.
+- The working-tree numbers check walks its globs in Python, outside the git budget; a broad glob such as `**/*.tex` over a large data folder could still slow session start.
+- A git process stopped at the deadline is killed, but its own child processes (submodule checks, fsmonitor hooks) may keep running in the background.
 - Non-ASCII paths appear octal-escaped (`core.quotepath`).
 - `state/.hook.log` grows between checkpoints. `/kit:checkpoint full` trims it to its last 500 lines.
 - `state/.sessions/` keeps one small start record per conversation and is never pruned.

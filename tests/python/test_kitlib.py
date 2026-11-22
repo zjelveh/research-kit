@@ -1,10 +1,11 @@
+import json
 from pathlib import Path
 
 import pytest
 
 from build_fixture import CONFIG, init_repo, minimal_project, write
 from kitlib import git as kit_git
-from kitlib import KitError, atomic_write, find_project, glob_to_regex, load_config, load_limits
+from kitlib import PLUGIN_ROOT, KitError, atomic_write, find_project, glob_to_regex, load_config, load_limits
 from kitlib import package_name_problem
 
 
@@ -26,7 +27,7 @@ def test_load_config_missing_nested_key(tmp_path):
 
 def test_load_limits_validates_channel(tmp_path):
     f = write(tmp_path / "limits.yml", "hook_budget_bytes: 8000\nrules_cap_bytes: 1536\n"
-              "reserve_bytes: 1024\nmin_state_bytes: 2048\nchannel: carrier-pigeon\n")
+              "reserve_bytes: 1024\nmin_state_bytes: 2048\ngit_budget_seconds: 20\nchannel: carrier-pigeon\n")
     with pytest.raises(KitError, match="channel must be"):
         load_limits(f)
 
@@ -79,12 +80,30 @@ def test_config_empty_value(tmp_path):
         load_config(p)
 
 
+GOOD_LIMITS = ("hook_budget_bytes: 8000\nrules_cap_bytes: 1536\nreserve_bytes: 1024\n"
+               "min_state_bytes: 2048\ngit_budget_seconds: 20\nchannel: stdout\n")
+
+
 def test_load_limits_ok_and_types(tmp_path):
-    good = ("hook_budget_bytes: 8000\nrules_cap_bytes: 1536\nreserve_bytes: 1024\n"
-            "min_state_bytes: 2048\nchannel: stdout\n")
-    assert load_limits(write(tmp_path / "l.yml", good))["hook_budget_bytes"] == 8000
+    assert load_limits(write(tmp_path / "l.yml", GOOD_LIMITS))["hook_budget_bytes"] == 8000
     with pytest.raises(KitError, match="'reserve_bytes' must be a positive integer"):
-        load_limits(write(tmp_path / "m.yml", good.replace("1024", '"1024"')))
+        load_limits(write(tmp_path / "m.yml", GOOD_LIMITS.replace("1024", '"1024"')))
+
+
+@pytest.mark.parametrize("new,msg", [
+    ("", "missing required key 'git_budget_seconds'"),
+    ("git_budget_seconds: 0\n", "'git_budget_seconds' must be a positive integer"),
+    ("git_budget_seconds: -5\n", "'git_budget_seconds' must be a positive integer"),
+])
+def test_load_limits_needs_a_positive_git_budget(tmp_path, new, msg):
+    with pytest.raises(KitError, match=msg):
+        load_limits(write(tmp_path / "l.yml", GOOD_LIMITS.replace("git_budget_seconds: 20\n", new)))
+
+
+def test_the_git_budget_leaves_the_hook_time_to_print():
+    hooks = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text())
+    timeout = hooks["hooks"]["SessionStart"][0]["hooks"][0]["timeout"]
+    assert load_limits()["git_budget_seconds"] <= timeout - 5
 
 
 @pytest.mark.parametrize("pattern", ["[ab].tex", "{a,b}.tex", "a**b/x.tex"])
