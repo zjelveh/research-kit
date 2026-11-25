@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Create a research-kit project (`new`), attach its Overleaf clone (`attach-paper`), add a language or package
-(`add-language`, `add-package`), start a talk (`new-talk`) and rewrite a project's git hooks (`install-hooks`).
-Specs: kit design §5.7, §5.8; languages and packages §3."""
+(`add-language`, `add-package`), add the parameter files (`add-params`), start a talk (`new-talk`) and rewrite a
+project's git hooks (`install-hooks`). Specs: kit design §5.7, §5.8; languages and packages §3; code §6."""
 from __future__ import annotations
 
 import argparse
@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from kitlib import (CONFIG_REL, LANGUAGES, PLUGIN_ROOT, KitError, find_project, git, load_config,  # noqa: E402
-                    package_name_problem, personal_config, personal_dir, stable_kit)
+                    package_name_problem, paper_folders, personal_config, personal_dir, stable_kit)
 import lint_numbers  # noqa: E402
 
 TEMPLATES = PLUGIN_ROOT / "templates"
@@ -61,8 +61,11 @@ def hooks_dir(repo: Path) -> Path:
 
 
 def install_hook(repo: Path, project_dir: Path, gate: str) -> None:
+    """The code repo's hook (gate slides) runs the code gate first; the paper clone's runs the paper gate."""
+    code_gate = (f'"{stable_kit()}" lint_code.py --project "{project_dir}" --precommit || exit $?\n'
+                 if gate == "slides" else "")
     text = render((TEMPLATES / "hooks" / "pre-commit").read_text(encoding="utf-8"),
-                  {"KIT": str(stable_kit()), "PROJECT_DIR": str(project_dir), "GATE": gate})
+                  {"KIT": str(stable_kit()), "PROJECT_DIR": str(project_dir), "GATE": gate, "CODE_GATE": code_gate})
     d = hooks_dir(repo)
     d.mkdir(parents=True, exist_ok=True)
     hook = d / "pre-commit"
@@ -83,6 +86,28 @@ LANG_NAMES = {"r": "R", "python": "Python"}
 LANG_PATHS = {"r": [".Rprofile", "renv", "renv.lock", "analysis/numbers/make_numbers.R"],
               "python": ["pyproject.toml", "uv.lock", ".python-version", ".venv",
                          "analysis/numbers/make_numbers.py"]}
+# The parameter files and their readers (code spec §2, §6). A file the kit wrote says research-kit in its
+# first lines; one that doesn't is the project's own, which the kit never overwrites.
+PARAM_FILES = ["analysis/params.yml", "analysis/explore/params.yml"]
+READERS = {"r": "analysis/params.R", "python": "analysis/params.py"}
+EXPLORE_OUT = "analysis/explore/out/"
+
+
+def kits_file(path: Path) -> bool:
+    return "research-kit" in "".join(path.read_text(encoding="utf-8", errors="replace").splitlines(True)[:5])
+
+
+def write_reader(project: Path, lang: str) -> str | None:
+    """Write the language's parameter reader unless the project has one; the path written, or None."""
+    rel = READERS[lang]
+    if (project / rel).exists():
+        if not kits_file(project / rel):
+            print(f"note: kept your own {rel}; the kit's param() reader needs that name, so rename yours and run "
+                  "scaffold.py add-params")
+        return None
+    (project / rel).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(TEMPLATES / "params" / Path(rel).name, project / rel)
+    return rel
 UNSTAGED = {".venv"}  # created but ignored by git
 UV_ENV = {"UV_PYTHON_DOWNLOADS": "never", "UV_LINK_MODE": "copy"}
 R_PKG_RULE = ('- After changing `pkg/r/`, run `renv::install("./pkg/r")` and `renv::snapshot()` '
@@ -295,6 +320,7 @@ def cmd_new(name: str, root: Path, langs: list[str], packages: dict[str, str | N
         (target / "notes" / "lit" / "pdfs").mkdir()  # ignored by git, so not in the template tree
         for lang in langs:
             copy_tree(TEMPLATES / "lang" / lang, target, values)
+            write_reader(target, lang)
         for lang, pkg in names.items():
             copy_tree(TEMPLATES / "pkg" / lang, target / "pkg" / lang, values | pkg_values(lang, pkg))
         if "r" in names:
@@ -440,6 +466,8 @@ def _add(project: Path, lang: str, override: str | None, package: bool) -> None:
     refuse_hidden_tracked(project)
     created = (LANG_PATHS[lang] if need_lang else []) + ([f"pkg/{lang}"] if package else [])
     refuse_existing(project, created, cmd)
+    if need_lang and not (project / READERS[lang]).exists():
+        created.append(READERS[lang])
     pkg = package_name(lang, project.name, override, "--name NAME") if package else None
     require_flow_config(project)
     if lang == "python":
@@ -457,6 +485,7 @@ def _add(project: Path, lang: str, override: str | None, package: bool) -> None:
     try:
         if need_lang:
             copy_tree(TEMPLATES / "lang" / lang, project, values)
+            write_reader(project, lang)
             langs.append(lang)
             set_config_line(project, "languages", flow_languages(langs))
         if package:
@@ -522,6 +551,59 @@ def cmd_add_package(lang: str, project: Path, name: str | None = None) -> None:
     _add(project, lang, name, package=True)
 
 
+def cmd_add_params(project: Path) -> list[str]:
+    """Bring a project made before the code spec up to it (code spec §6): write the parameter files and the
+    readers for its languages that it lacks, ignore analysis/explore/out/, and commit only those files; then
+    rewrite the code repo's kit hook so the code gate runs. A file of the same name that the kit didn't
+    write is the project's own: nothing is written, and the user renames it first."""
+    project = find_project(Path(os.path.abspath(project)))
+    require_toplevel(project)
+    cfg = load_config(project)
+    wanted = {rel: TEMPLATES / "project" / rel for rel in PARAM_FILES}
+    wanted |= {rel: TEMPLATES / "params" / Path(rel).name for lang, rel in READERS.items()
+               if lang in cfg["languages"]}
+    foreign = [rel for rel in wanted if (project / rel).exists() and not kits_file(project / rel)]
+    if foreign:
+        raise KitError(f"{', '.join(foreign)} already exist{'s' if len(foreign) == 1 else ''} and "
+                       f"{'is' if len(foreign) == 1 else 'are'} not the kit's; rename or move "
+                       f"{'it' if len(foreign) == 1 else 'them'}, then rerun add-params")
+    created = [rel for rel in wanted if not (project / rel).exists()]
+    refuse_ignored(project, created)
+    for rel in created:
+        (project / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(wanted[rel], project / rel)
+    ignore = project / ".gitignore"
+    probe = subprocess.run(["git", "-C", str(project), "check-ignore", "-q", "--no-index", EXPLORE_OUT + "x"])
+    if probe.returncode != 0:
+        if git(project, "status", "--porcelain", "--", ".gitignore").strip():
+            print(f"add-params: .gitignore has uncommitted changes, so add the line {EXPLORE_OUT} to it yourself")
+        else:
+            text = ignore.read_text(encoding="utf-8") if ignore.exists() else ""
+            ignore.write_text(text + ("" if not text or text.endswith("\n") else "\n") + EXPLORE_OUT + "\n",
+                              encoding="utf-8")
+            created.append(".gitignore")
+    if created:
+        git(project, "add", "--", *created)
+        git(project, "commit", "-q", "-m", "Add the parameter files and readers (research-kit)", "--", *created)
+        print(f"add-params: committed {', '.join(created)} in {project} (not pushed)")
+    else:
+        print("add-params: the parameter files, readers and ignore line are all there")
+    try:                                  # the files are committed; the hook is a further step that may not apply
+        main_checkout = main_checkout_if_linked(project)
+        if main_checkout is not None:
+            print(f"add-params: this is a linked worktree, whose hook is its main checkout's; run scaffold.py "
+                  f"install-hooks there ({main_checkout}) to turn the code gate on")
+        elif kit_hook(project) is not None:
+            install_hook(project, project, "slides")
+            print(f"add-params: the code gate is on in {hooks_dir(project) / 'pre-commit'}")
+        else:
+            print("add-params: no kit hook in this repo, so the code gate is off; run scaffold.py install-hooks "
+                  "from the project's main checkout")
+    except KitError as e:
+        print(f"add-params: the code gate is off: {e}")
+    return created
+
+
 def set_paper_branch(project: Path, branch: str) -> None:
     cfg = project / ".claude" / "research.yml"
     text = cfg.read_text(encoding="utf-8")
@@ -530,21 +612,6 @@ def set_paper_branch(project: Path, branch: str) -> None:
         raise KitError(f"{cfg}: expected exactly one 'paper_branch:' line, found {n}")
     cfg.write_text(new, encoding="utf-8")
     print(f"research.yml: paper_branch set to {branch} (uncommitted in the code repo)")
-
-
-def paper_folders(project: Path, cfg: dict, paper: Path) -> list[Path]:
-    """The kit's folders in the clone: generated/ wherever numbers_tex and notation_tex point, and figures/
-    and tables/ beside numbers_tex's folder. A manuscript in a subfolder (draft/) gets them there."""
-    gen = []
-    for key in ("numbers_tex", "notation_tex"):
-        d = (project / cfg[key]).parent.resolve()
-        if d != paper and paper not in d.parents:
-            raise KitError(f"research.yml: {key} ({cfg[key]}) must be inside paper_dir ({cfg['paper_dir']})")
-        if d != paper and d not in gen:
-            gen.append(d)
-    numbers_dir = (project / cfg["numbers_tex"]).parent.resolve()
-    base = numbers_dir.parent if numbers_dir != paper else paper
-    return gen + [base / "figures", base / "tables"]
 
 
 def kit_hook(repo: Path) -> Path | None:
@@ -706,15 +773,22 @@ def default_root() -> Path:
     return path
 
 
+def main_checkout_if_linked(repo: Path) -> Path | None:
+    """The main checkout when `repo` is a linked worktree, else None. A worktree shares the main checkout's
+    hooks, so a hook written from it would carry the worktree's path (shareable-kit spec §4)."""
+    common = hooks_dir(repo).parent
+    if Path(git(repo, "rev-parse", "--absolute-git-dir").strip()).resolve() != common:
+        return common.parent
+    return None
+
+
 def cmd_install_hooks(project: Path) -> list[Path]:
     """Rewrite the kit's git hooks to call the stable launcher: the code repo's (slides gate) and, once the
-    paper is attached, the clone's (paper gate). Run it on a project's main checkout, not a worktree: a
-    worktree shares the main repo's hooks (shareable-kit spec §4)."""
+    paper is attached, the clone's (paper gate). Run it on a project's main checkout, not a worktree."""
     project = find_project(Path(os.path.abspath(project)))
-    common = hooks_dir(project).parent
-    if Path(git(project, "rev-parse", "--absolute-git-dir").strip()).resolve() != common:
+    if (main_checkout := main_checkout_if_linked(project)) is not None:
         raise KitError(f"{project} is a linked worktree; its hooks are its main checkout's, so run "
-                       f"install-hooks there ({common.parent})")
+                       f"install-hooks there ({main_checkout})")
     cfg = load_config(project)
     targets = [(project, "slides")]
     paper = project / cfg["paper_dir"]
@@ -733,6 +807,11 @@ def cmd_install_hooks(project: Path) -> list[Path]:
     for repo, gate, hook in todo:
         install_hook(repo, project, gate)
         print(f"installed {hook}")
+    missing = [rel for rel in [*PARAM_FILES, *(READERS[lang] for lang in cfg["languages"])]
+               if not (project / rel).exists()]
+    if missing:
+        print(f"note: the code gate is on, but {', '.join(missing)} {'is' if len(missing) == 1 else 'are'} missing; "
+              "run scaffold.py add-params so that param() exists")
     return [hook for _, _, hook in todo]
 
 
@@ -761,6 +840,8 @@ def main(argv: list[str] | None = None) -> int:
     nt.add_argument("--project", type=Path, default=Path.cwd())
     ih = sub.add_parser("install-hooks")
     ih.add_argument("--project", type=Path, default=Path.cwd())
+    ap_ = sub.add_parser("add-params")
+    ap_.add_argument("--project", type=Path, default=Path.cwd())
     a = ap.parse_args(argv)
     try:
         if a.cmd == "new":
@@ -774,6 +855,8 @@ def main(argv: list[str] | None = None) -> int:
             cmd_new_talk(a.talk, a.project)
         elif a.cmd == "install-hooks":
             cmd_install_hooks(a.project)
+        elif a.cmd == "add-params":
+            cmd_add_params(a.project)
         else:
             cmd_add_package(a.lang, a.project, a.name)
     except KitError as e:

@@ -2,7 +2,7 @@
 
 A Claude Code plugin for empirical research papers. It carries a project's state from one session to the next, keeps every number in the paper and the talks generated from code, and gives Claude written procedures for notes, literature, prose, slides and code review.
 
-The rules and the writing voice it ships are defaults. You can replace any of them with your own; see [Changing the defaults](#changing-the-defaults).
+The rules and the writing voice it ships are defaults. The writing voice is an example of what a voice file holds, meant to be replaced with your own. You can replace any default; see [Changing the defaults](#changing-the-defaults).
 
 ## What it does
 
@@ -11,14 +11,14 @@ flowchart TB
     subgraph you["Your preferences (optional): ~/.config/research-kit"]
         direction LR
         prules["rules"]
-        pvoice["writing voice and slide style"]
+        pvoice["writing voice and patterns, slide and figure style"]
         pvenue["venue files"]
     end
 
     subgraph session["Each Claude Code session in a kit project"]
         direction LR
         start["Session start: rules, current state, status checks"]
-        skills["/kit:notes, /kit:lit, /kit:numbers, /kit:writing, /kit:slides"]
+        skills["/kit:notes, /kit:lit, /kit:numbers, /kit:figures, /kit:code, /kit:writing, /kit:slides"]
         review["/kit:review: Codex reviews the code change; Claude checks each finding"]
         learn["/kit:learn: saves a correction"]
         checkpoint["/kit:checkpoint: updates the current state"]
@@ -56,7 +56,7 @@ flowchart TB
 - **Generated numbers.** Each language's `make_numbers` script writes `numbers.tex`, one LaTeX macro per result, and the claims ledger records which script produced each one. The paper and the talks use the macros. A git hook blocks a commit that adds a hand-typed number to the paper or the slides.
 - **Checkpoints.** `/kit:checkpoint` updates `CURRENT_STATE.md` before a session ends, so the next session starts where this one stopped.
 - **Code review.** With the Codex CLI installed, `/kit:review` has Codex review a code change. Claude then checks each finding against the code and proposes fixes for your approval.
-- **Lessons.** When you correct Claude and want the correction kept, `/kit:learn` saves it in one place: your rules, your voice, a venue file or the project's `CLAUDE.md`.
+- **Lessons.** When you correct Claude and want the correction kept, `/kit:learn` saves it in one place: your rules, your voice or writing patterns, your slide or figure style, a venue file or the project's `CLAUDE.md`.
 
 ## Prerequisites
 
@@ -77,7 +77,7 @@ claude plugin install kit@research-kit
 
 The `/kit:` skills are available in every project. The session-start hook runs only in kit projects (folders with `.claude/research.yml`) and is silent everywhere else.
 
-To update: `claude plugin marketplace update research-kit`, then `claude plugin update kit@research-kit`.
+To update: `claude plugin marketplace update research-kit`, then `claude plugin update kit@research-kit`. A project made with an earlier version gets the parameter files and the code check with `kit scaffold.py add-params`, run in the project.
 
 ## Quick start
 
@@ -89,11 +89,11 @@ In Claude Code, run `/kit:new-project <name>`. The first time, it runs `kit setu
 my-paper/
 ├── .claude/research.yml   languages, paper folder, venue
 ├── CLAUDE.md              rules for this project only
-├── analysis/              code; analysis/numbers/make_numbers.R or .py writes the numbers
+├── analysis/              code; params.yml holds its numbers, dates and paths; explore/ holds quick questions; numbers/make_numbers.R or .py writes the paper's numbers
 ├── paper/                 git clone of the Overleaf project
 │   └── generated/         numbers.tex and notation.tex, written by the kit
 ├── slides/                Beamer talks
-├── notes/                 research questions, memos, notation, literature map and searches
+├── notes/                 argument, outlines, research questions, memos, notation, literature, figure specs
 └── state/                 CURRENT_STATE.md, DECISIONS.md, CLAIMS_LEDGER.md
 ```
 
@@ -103,13 +103,17 @@ my-paper/
 |---|---|---|
 | `/kit:new-project` | Sets up the kit, scaffolds a project, attaches the Overleaf clone and checks the setup | Starting a new paper |
 | `/kit:checkpoint [quick\|full]` | Updates `CURRENT_STATE.md` and commits the files it changed; full mode adds decisions, pointers, the ledger check and repo status | Ending a session, or before a compaction |
-| `/kit:learn` | Saves a lesson to your rules, voice, slide style or a venue file, or to the project's `CLAUDE.md` | A correction that should hold from now on |
+| `/kit:learn` | Saves a lesson to your rules, voice, writing patterns, slide or figure style, or a venue file, or to the project's `CLAUDE.md` | A correction that should hold from now on |
 | `/kit:notes` | Research questions, dated memos and notation | Recording an idea, conjecture, memo or symbol |
 | `/kit:lit` | Literature map, verified `.bib` entries and saved searches | Searching, adding or citing literature |
-| `/kit:numbers` | Generated number macros and the numbers check | Adding a number, table or figure, or a blocked commit |
-| `/kit:writing` | Base voice, methods-paper rules, venue rules and the editing process | Drafting or editing manuscript prose |
+| `/kit:numbers` | Generated number macros and the numbers check | Adding a number, table or figure, or a commit blocked by the numbers check |
+| `/kit:figures` | Designs a figure from its data and the reader's task with Munzner's idioms, or critiques an existing one | Making or reviewing a figure |
+| `/kit:code` | Reads the project's code map first, keeps definitions in the project's library and every number, date and path in its parameter files, and answers quick questions with dated explore scripts; a pre-commit check blocks typed values | Writing or changing analysis code |
+| `/kit:writing` | Works from the paper's argument to a section outline, a whole-section draft and line edits, with the voice, writing patterns and venue rules | Drafting or editing manuscript prose |
 | `/kit:slides` | Beamer talks from the kit's template, slide by slide | Creating or revising a talk |
 | `/kit:review` | Codex reviews the change; Claude checks every finding and proposes fixes for approval | Before reporting a change to 2+ code files as done |
+
+`/kit:figures` builds on Tamara Munzner's framework in *Visualization Analysis & Design* (2014) and her lecture decks: each idiom file cites the deck pages it rests on, and idioms marked `origin: kit` are the kit's own, built in her terms. Idioms you add are marked `origin: own`.
 
 ## Changing the defaults
 
@@ -118,8 +122,11 @@ Each default below is a file in the kit's `plugins/kit/defaults/` folder. `kit c
 | Item | What it sets | Command |
 |---|---|---|
 | `rules` | The rules loaded at every session start (at most 1,536 bytes) | `kit customize rules` |
-| `writing-voice` | The base voice for prose and slide text, with its pre-send checks | `kit customize writing-voice` |
+| `writing-voice` | An example voice for prose and slide text, with its pre-send checks, to replace with your own | `kit customize writing-voice` |
+| `writing-patterns` | How paragraphs and sections are built: results in words against the baseline, a synthesis after a series, the usual section sequence | `kit customize writing-patterns` |
 | `slides-style` | The slide conventions on top of the kit's fixed slide rules | `kit customize slides-style` |
+| `figure-style` | The colour, label and size conventions for figures | `kit customize figure-style` |
+| `idiom <id>` | One idiom in the figures catalogue; a new id adds an idiom of your own | `kit customize idiom <id>` |
 | `venue <name>` | Rules for a target journal. The kit ships `undecided`; set a project's venue in its `.claude/research.yml` | `kit customize venue <name>` |
 
 Where new projects go is a setting: put `projects_root: /path/to/projects` in `~/.config/research-kit/config.yml`. Without it, `/kit:new-project` asks.

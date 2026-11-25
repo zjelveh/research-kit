@@ -27,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from kitlib import PLUGIN_ROOT, GitTimeout, KitError, git, git_timeout, read_env, time_left  # noqa: E402
+import code_map  # noqa: E402
 
 CODE_EXT = {".R", ".r", ".Rmd", ".qmd", ".py", ".sh", ".sql", ".stan", ".jl", ".do"}
 TEMPLATES = PLUGIN_ROOT / "templates" / "review"
@@ -358,6 +359,7 @@ def fill_brief(project: Path, start: str, how: str, head: str, reviewed: str, di
         "CONTEXT": context_paths(project),
         "PLAN": f"`{plan}`" if plan else "none",
         "AUTHOR": author.strip() if author and author.strip() else "(none given)",
+        "CODE_MAP": code_map.review_section(project, files, start),
     }
     text = BRIEF_TEMPLATE.read_text(encoding="utf-8")
     for key, value in values.items():

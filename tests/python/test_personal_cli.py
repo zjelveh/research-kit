@@ -54,3 +54,18 @@ def test_customize_leaves_no_temporary_files_and_never_overwrites(capsys, monkey
     assert "already exists" in capsys.readouterr().err
     assert (personal() / "venues" / "my-journal.md").read_text() == "theirs\n"
     assert sorted(p.name for p in (personal() / "venues").iterdir()) == ["my-journal.md"]
+
+
+def test_customize_a_new_idiom_starts_from_the_template(capsys):
+    assert main(["customize", "idiom", "my-plot"]) == 0
+    text = (personal() / "idioms" / "my-plot.md").read_text()
+    assert text.startswith("---\nid: my-plot\n") and "{{" not in text
+    assert "\norigin: own\n" in text
+    assert main(["which", "idiom", "my-plot"]) == 0
+    assert capsys.readouterr().out.strip().endswith("idioms/my-plot.md")
+
+
+def test_customize_writing_patterns(capsys):
+    assert main(["customize", "writing-patterns"]) == 0
+    copy = personal() / "writing-patterns.md"
+    assert copy.read_text() == (DEFAULTS / "writing-patterns.md").read_text()

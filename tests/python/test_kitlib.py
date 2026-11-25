@@ -204,3 +204,21 @@ def test_half_migrated_config_still_refused(tmp_path):
     p = cfg_with(tmp_path, "packages: {}", "packages: {}\npkg_name: demo")
     with pytest.raises(KitError, match="schema before languages"):
         load_config(p)
+
+
+def test_library_key_is_optional_and_a_list_of_strings(tmp_path):
+    assert "library" not in load_config(minimal_project(tmp_path / "a"))
+    cfg = load_config(minimal_project(tmp_path / "b", CONFIG + "library: [analysis/R, analysis/paths.py]\n"))
+    assert cfg["library"] == ["analysis/R", "analysis/paths.py"]
+    assert load_config(minimal_project(tmp_path / "c", CONFIG + "library: []\n"))["library"] == []
+    for bad in ("library: analysis/R\n", "library: [analysis/R, 3]\n", "library: ['']\n"):
+        with pytest.raises(KitError, match="'library' must be a list"):
+            load_config(minimal_project(tmp_path / f"d{len(bad)}", CONFIG + bad))
+
+
+def test_paper_folders_lives_in_kitlib(tmp_path):
+    from kitlib import paper_folders
+    p = minimal_project(tmp_path)
+    cfg = load_config(p)
+    paper = (p / "paper").resolve()
+    assert paper_folders(p, cfg, paper)[-2:] == [paper / "figures", paper / "tables"]

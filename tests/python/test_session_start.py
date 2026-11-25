@@ -234,7 +234,7 @@ def test_paper_not_a_git_repo(tmp_path):
 def test_review_status_line(tmp_path):
     p = cmd_new("demo", tmp_path, ["r"])
     out = build_context(p, {}, LIMITS, RULES)
-    assert "review: none yet (2 code files changed in the last 20 commits)" in out   # make_numbers.R, renv/activate.R
+    assert "review: none yet (3 code files changed in the last 20 commits)" in out   # make_numbers.R, params.R, renv/activate.R
     head = subprocess.run(["git", "-C", str(p), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     fake_review(p, "r", head, finished="2026-10-18T10:00:00")
     assert "review:" not in build_context(p, {}, LIMITS, RULES)

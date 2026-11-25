@@ -1,4 +1,4 @@
-# research-kit project config (spec §4.1). Every key is required.
+# research-kit project config (spec §4.1). Every key is required except library.
 paper_dir: paper
 paper_branch: main
 # languages: r and/or python, in the order their numbers scripts run. packages: {} when there is none.
@@ -14,3 +14,4 @@ lint:
   slides:
     globs: ["slides/*/*.tex"]
     baseline: .lint_baseline_slides
+# library: [analysis/R]   # optional: folders or files of shared code; default: the package

@@ -6,7 +6,7 @@
     {
       "name": "kit",
       "source": "./plugins/kit",
-      "description": "Research workflow for empirical papers: session state, notes, literature, generated numbers, writing, slides and code review."
+      "description": "Research workflow for empirical papers: session state, notes, literature, generated numbers, figures, code reuse, writing, slides and code review."
     }
   ]
 }

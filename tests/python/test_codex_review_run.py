@@ -33,6 +33,7 @@ def test_complete_review_writes_every_record(tmp_path, monkeypatch):
     assert meta["reviewed"] == head(p) and meta["changed_files"] == ["analysis/a.R", "analysis/b.py"]
     assert (folder / "author_brief.md").read_text() == brief.read_text()
     assert "Claims: a.R sets x to 3." in (folder / "brief.md").read_text()
+    assert "## What the code map finds in the changed files" in (folder / "brief.md").read_text()
     assert "### F1 (high, code bug): `analysis/a.R:3`" in (folder / "report.md").read_text()
     assert json.loads((folder / "findings.json").read_text())["findings"][0]["id"] == "F1"
     rec = json.loads(record.read_text())

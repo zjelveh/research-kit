@@ -18,16 +18,19 @@ def test_numbers_from_both_languages_reach_the_slides(tmp_path, capsys):
     p = cmd_new("demo", tmp_path, ["r", "python"], {"r": None, "python": None})
     cmd_attach(str(bare), p)
     write(p / "analysis" / "sims" / "summary.csv", "coverage,bias\n0.9412,0.0123\n")
+    params = p / "analysis" / "params.yml"
+    params.write_text(params.read_text() + "\n# The simulation summary the paper's numbers come from.\n"
+                      "sims_summary: 'analysis/sims/summary.csv'\n")
     r_path, py_path = p / "analysis/numbers/make_numbers.R", p / "analysis/numbers/make_numbers.py"
     r_path.write_text(r_path.read_text().replace(
         "entries <- list(\n",
-        'library(demo)  # only in the renv project library\nentries <- list(\n  list(name = "coverageMain", value = read.csv("analysis/sims/summary.csv")$coverage[1],\n'
-        '       format = "%.2f", src = "analysis/sims/summary.csv")\n'))  # no trailing comma: R's list() rejects one
+        'library(demo)  # only in the renv project library\nentries <- list(\n  list(name = "coverageMain", value = read.csv(param("sims_summary"))$coverage[1],\n'
+        '       format = "%.2f", src = param("sims_summary"))\n'))  # no trailing comma: R's list() rejects one
     py_path.write_text(py_path.read_text().replace(
         "entries = [\n",
-        "import csv\nimport demo  # only in the uv environment\nrow = next(csv.DictReader(open('analysis/sims/summary.csv')))\n"
+        "import csv\nimport demo  # only in the uv environment\nrow = next(csv.DictReader(open(param('sims_summary'))))\n"
         "entries = [\n    dict(name='biasMain', value=float(row['bias']), format='%.3f',\n"
-        "         src='analysis/sims/summary.csv'),\n"))
+        "         src=param('sims_summary')),\n"))
     subprocess.run(["git", "-C", str(p), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(p), "commit", "-qm", "numbers"], check=True)
     assert numbers_build.main(["--project", str(p)]) == 0

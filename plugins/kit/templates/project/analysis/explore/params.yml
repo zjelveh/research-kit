@@ -1,0 +1,4 @@
+# Parameters for quick questions (research-kit, /kit:code): the one-off values that explore scripts use,
+# read with param("name"), in the format of analysis/params.yml. No approval needed; pipeline code may
+# not use them. A value that moves into the pipeline moves to analysis/params.yml. Keep this header.
+

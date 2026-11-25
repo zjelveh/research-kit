@@ -1,0 +1,50 @@
+# Fixed terms for the figures catalogue and figure specs (figures spec section 2.3). Not overridable.
+# Channel ranks follow Munzner, Marks p. 9: one order for ordered attributes, position first.
+groups: [keys, orientation, density, spatial, manipulate, facet, reduce]
+shapes: [0-keys, 1-key, 2-keys, geographic, multiple-views, any-data]
+tasks: [compare-values, trend, part-to-whole, relationship, distribution, clusters-outliers,
+        spatial-pattern, lookup]
+attribute_types: [categorical, ordinal, quantitative]
+roles: [interval, facet, layer]
+marks: [point, line, area, glyph]
+forms: [encoding, view]
+kinds: [idiom, design-choice]
+media: [static, interactive]
+origins: [munzner, kit, own]   # own: an idiom you add in your personal folder
+reference_kinds: [line, band]
+reference_axes: [x, y, diagonal]
+substitutes:            # a type may stand where the listed types are needed; the rules chain
+  ordinal: [categorical]
+  quantitative: [ordinal, categorical]
+channels:
+  position-common:    {type: position, rank: 1, source: Marks p. 9}
+  position-unaligned: {type: position, rank: 2, source: Marks p. 9}
+  length:             {type: magnitude, rank: 3, source: Marks p. 9}
+  tilt:               {type: magnitude, rank: 4, source: Marks p. 9}
+  area:               {type: magnitude, rank: 5, source: Marks p. 9}
+  depth:              {type: magnitude, rank: 6, source: Marks p. 9}
+  luminance:          {type: magnitude, rank: 7, source: Marks p. 9}
+  saturation:         {type: magnitude, rank: 8, source: Marks p. 9}
+  curvature:          {type: magnitude, rank: 9, source: Marks p. 9}
+  volume:             {type: magnitude, rank: 10, source: Marks p. 9}
+  spatial-region:     {type: identity, rank: 1, source: Marks p. 9}
+  hue:                {type: identity, rank: 2, source: Marks p. 9}
+  motion:             {type: identity, rank: 3, source: Marks p. 9}
+  shape:              {type: identity, rank: 4, source: Marks p. 9}
+  size:               {type: magnitude, rank: null, note: "Our reading: length, area or volume, by mark"}
+  colour:             {type: null, rank: null, note: "Our reading: typed by its colour_scale"}
+  linetype:           {type: identity, rank: null, note: "Our reading: a shape channel for line marks"}
+  connection:         {type: null, rank: null, note: "Our reading: joins marks; carries no attribute type"}
+  density:            {type: magnitude, rank: null, note: "Our reading: dots per unit of area, as in a dot-density map (Spatial p. 28); Marks p. 9 doesn't rank it"}
+colour_scales:          # categorical is hue; sequential and diverging act as luminance, with its rank
+  categorical: {type: identity, rank: 2, channel: hue}
+  sequential:  {type: magnitude, rank: 7, channel: luminance}
+  diverging:   {type: magnitude, rank: 7, channel: luminance}
+decks:                  # short names used in citations; Munzner's lecture decks
+  Layout:         {title: "Layout & Tables", version: Revised 2026-09}
+  Interact:       {title: "Interactive Views (Ch 11/12)", version: 2022-01-11}
+  Spatial:        {title: "Spatial Data (Ch 8)", version: Revised 2026-03-01}
+  Spatial 2025:   {title: "Spatial, NecklaceMaps, Myriahedral; Ex: Ballotmaps", version: 2025-10-23}
+  Marks:          {title: "Information Visualization: Marks & Channels", version: 2026-01-20}
+  Reduce:         {title: "Reduce: Aggregation & Filtering (Ch 13)", version: 2022-01-11}
+  Data:           {title: "Data Abstraction (Ch 2)", version: 2022-01-11}

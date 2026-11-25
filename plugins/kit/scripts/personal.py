@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """The personal layer (shareable-kit spec §2).
 
-  personal.py which rules|writing-voice|slides-style|venue <name>    print the file in effect
-  personal.py customize rules|writing-voice|slides-style|venue <name> copy the default into the personal folder
+  personal.py which <item>        print the file in effect
+  personal.py customize <item>    copy the default (or, for a new venue or idiom, a template) into the personal folder
   personal.py where                                                  print the personal folder
+  <item> is rules, writing-voice, writing-patterns, slides-style, figure-style, venue <name> or idiom <name>
 
 Exit: 0 ok, 2 error.
 """
@@ -19,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from kitlib import DEFAULTS, PLUGIN_ROOT, KitError, in_effect, item_rel, personal_dir  # noqa: E402
 
 VENUE_TEMPLATE = PLUGIN_ROOT / "templates" / "venue.md"
+IDIOM_TEMPLATE = PLUGIN_ROOT / "templates" / "idiom.md"
 
 
 def customize(item: str, name: str | None = None) -> Path:
@@ -30,6 +32,8 @@ def customize(item: str, name: str | None = None) -> Path:
         text = (DEFAULTS / rel).read_text(encoding="utf-8")
     elif item == "venue":
         text = VENUE_TEMPLATE.read_text(encoding="utf-8").replace("{{VENUE}}", name)
+    elif item == "idiom":
+        text = IDIOM_TEMPLATE.read_text(encoding="utf-8").replace("{{ID}}", name)
     else:
         raise KitError(f"the kit has no default {rel}")
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -56,7 +60,8 @@ def main(argv: list[str] | None = None) -> int:
         if a.action == "where":
             print(personal_dir())
         elif a.item is None:
-            raise KitError(f"{a.action} needs an item: rules, writing-voice, slides-style or venue <name>")
+            raise KitError(f"{a.action} needs an item: rules, writing-voice, writing-patterns, slides-style, "
+                           "figure-style, venue <name> or idiom <name>")
         elif a.action == "which":
             print(in_effect(a.item, a.name)[0])
         else:

@@ -1,0 +1,6 @@
+# The pipeline's parameters (research-kit, /kit:code): every number, date and path the paper's code uses,
+# read with param("name"). One `name: value` per line, with a comment line directly above saying what
+# the value is and why, and no comment after the value. Values: numbers, 'single-quoted strings' (dates
+# and paths always quoted), true or false, or a one-line [list] of numbers only or strings only. Paths are
+# relative to the project root. Changing a value needs approval. Keep this header and the blank line below.
+

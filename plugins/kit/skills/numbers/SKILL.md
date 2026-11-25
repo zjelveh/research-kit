@@ -22,12 +22,13 @@ Not a result, so `%num-ok` at the end of the line is allowed, with approval: a d
 1. **Source.** The value comes from a committed file under `analysis/`, usually a small summary CSV written by code. `numbers_build.py` refuses an untracked or modified source. Commit the source first. Large raw outputs are not sources. Never write the git commit or the run date into a committed result file. Rerunning with unchanged results would then change the file and break any “results unchanged” check.
 2. **Entry.** Add or change one entry in the script for the language that computes the value: `analysis/numbers/make_numbers.R` or `analysis/numbers/make_numbers.py`. Each passes its entries to `emit_numbers()`.
    ```r
-   list(name = "coverageMain", value = read.csv("analysis/sims/summary.csv")$coverage[1],
-        format = "%.2f", src = "analysis/sims/summary.csv")
+   list(name = "coverageMain", value = read.csv(param("sims_summary"))$coverage[1],
+        format = "%.2f", src = param("sims_summary"))
    ```
    ```python
-   dict(name="biasMain", value=float(summary["bias"][0]), format="%.3f", src="analysis/sims/summary.csv")
+   dict(name="biasMain", value=float(summary["bias"][0]), format="%.3f", src=param("sims_summary"))
    ```
+   The source's path is a parameter in `analysis/params.yml` (`/kit:code`), never typed: the scripts load `param()` at the top. A script made before the parameter files needs `source("analysis/params.R")` (R) or `sys.path.insert(0, "analysis")` and `from params import param` (Python) added after its emit lines; if `analysis/params.yml` is missing, run `"${CLAUDE_PLUGIN_ROOT}/bin/kit" scaffold.py add-params` first.
    - `name`: letters only, camelCase, starting lowercase, unique across both scripts. The macro name is the claim's stable id, so don't rename a macro that is in use.
    - `value`: read or computed from `src` in the script, never a typed literal.
    - `format`: an `sprintf` format in R, a `%` format in Python. Use number formats (`%.2f`; `%d` only for whole numbers) for numbers, and `%s` only for strings: `%s` prints doubles differently in R and Python.
@@ -41,11 +42,11 @@ Not a result, so `%num-ok` at the end of the line is allowed, with approval: a d
 
 **Packages the scripts need.** R: `renv::install("<name>")`, then `renv::snapshot()`; Python: `uv add <name>`. Commit the lockfile (`renv.lock` or `pyproject.toml` and `uv.lock`) with the script change.
 
-Tables and figures are written by code into the paper's `tables/` and `figures/` folders, never typed. They sit beside the `generated/` folder that holds `numbers.tex`: `paper/tables/` by default, `paper/draft/tables/` for `numbers_tex: paper/draft/generated/numbers.tex`. `tables/` isn't linted, so every number in a table must come from code.
+Tables and figures are written by code into the paper's `tables/` and `figures/` folders, never typed. They sit beside the `generated/` folder that holds `numbers.tex`: `paper/tables/` by default, `paper/draft/tables/` for `numbers_tex: paper/draft/generated/numbers.tex`. `tables/` isn't linted, so every number in a table must come from code. Designing a figure, or reviewing one, goes through `/kit:figures`.
 
 ## When a commit is blocked
 
-The pre-commit hook in each repo (paper: `paper/.lint_baseline`; code: `.lint_baseline_slides`) prints:
+In the code repo, the hook runs the code check first: a block that starts `code gate: N findings` is about typed values in code, and `/kit:code` says what to do. The numbers check follows. The pre-commit hook in each repo (paper: `paper/.lint_baseline`; code: `.lint_baseline_slides`) prints:
 
 ```
 paper [index]: count=N baseline=B REGRESSION

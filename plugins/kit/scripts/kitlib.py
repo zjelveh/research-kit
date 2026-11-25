@@ -15,7 +15,9 @@ import yaml
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 LIMITS_FILE = PLUGIN_ROOT / "limits.yml"
 DEFAULTS = PLUGIN_ROOT / "defaults"
-ITEM_FILES = {"rules": "rules.md", "writing-voice": "writing-voice.md", "slides-style": "slides-style.md"}
+ITEM_FILES = {"rules": "rules.md", "writing-voice": "writing-voice.md", "writing-patterns": "writing-patterns.md",
+              "slides-style": "slides-style.md", "figure-style": "figure-style.md"}
+NAMED_ITEMS = {"venue": "venues", "idiom": "idioms"}
 VENUE_RE = re.compile(r"[a-z0-9][a-z0-9_-]*")
 PERSONAL_CONFIG_KEYS = ("projects_root",)
 CONFIG_REL = Path(".claude") / "research.yml"
@@ -121,8 +123,27 @@ def load_config(project: Path) -> dict:
         v = _get(data, key)
         if not isinstance(v, list) or not v or not all(isinstance(g, str) and g.strip() for g in v):
             raise KitError(f"{path}: '{key}' must be a non-empty list of non-empty strings, got {v!r}")
+    if "library" in data:
+        lib = data["library"]
+        if not isinstance(lib, list) or not all(isinstance(f, str) and f.strip() for f in lib):
+            raise KitError(f"{path}: 'library' must be a list of folders or files (strings), got {lib!r}")
     _check_languages(path, data)
     return data
+
+
+def paper_folders(project: Path, cfg: dict, paper: Path) -> list[Path]:
+    """The kit's folders in the clone: generated/ wherever numbers_tex and notation_tex point, and figures/
+    and tables/ beside numbers_tex's folder. A manuscript in a subfolder (draft/) gets them there."""
+    gen = []
+    for key in ("numbers_tex", "notation_tex"):
+        d = (project / cfg[key]).parent.resolve()
+        if d != paper and paper not in d.parents:
+            raise KitError(f"research.yml: {key} ({cfg[key]}) must be inside paper_dir ({cfg['paper_dir']})")
+        if d != paper and d not in gen:
+            gen.append(d)
+    numbers_dir = (project / cfg["numbers_tex"]).parent.resolve()
+    base = numbers_dir.parent if numbers_dir != paper else paper
+    return gen + [base / "figures", base / "tables"]
 
 
 def load_limits(path: Path = LIMITS_FILE) -> dict:
@@ -200,12 +221,12 @@ def link_stable(plugin: Path = PLUGIN_ROOT) -> None:
 
 def item_rel(item: str, name: str | None = None) -> Path:
     """An overridable item's file name, relative to the defaults and the personal folder."""
-    if item == "venue":
+    if item in NAMED_ITEMS:
         if not name or not VENUE_RE.fullmatch(name):
-            raise KitError(f"venue name {name!r}: use lowercase letters, digits, - and _")
-        return Path("venues") / f"{name}.md"
+            raise KitError(f"{item} name {name!r}: use lowercase letters, digits, - and _")
+        return Path(NAMED_ITEMS[item]) / f"{name}.md"
     if name is not None or item not in ITEM_FILES:
-        raise KitError(f"unknown item {item!r}; use rules, writing-voice, slides-style or venue <name>")
+        raise KitError(f"unknown item {item!r}; use {', '.join(ITEM_FILES)}, venue <name> or idiom <name>")
     return Path(ITEM_FILES[item])
 
 

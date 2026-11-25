@@ -15,9 +15,11 @@ COMMON = [
     "state/CURRENT_STATE.md", "state/DECISIONS.md", "state/CLAIMS_LEDGER.md", "state/archive/.gitkeep",
     "notes/research_questions.md", "notes/notation.md", "notes/memos/.gitkeep", "notes/lit/map.md",
     "notes/lit/searches/.gitkeep", "analysis/sims/.gitkeep", "analysis/applications/.gitkeep", "slides/.gitkeep",
+    "notes/figures/.gitkeep", "notes/argument.md", "notes/outlines/.gitkeep",
+    "analysis/params.yml", "analysis/explore/params.yml",
 ]
-R_FILES = ["analysis/numbers/make_numbers.R", ".Rprofile", "renv/activate.R", "renv.lock"]
-PY_FILES = ["analysis/numbers/make_numbers.py", "pyproject.toml", ".python-version", "uv.lock"]
+R_FILES = ["analysis/numbers/make_numbers.R", ".Rprofile", "renv/activate.R", "renv.lock", "analysis/params.R"]
+PY_FILES = ["analysis/numbers/make_numbers.py", "pyproject.toml", ".python-version", "uv.lock", "analysis/params.py"]
 R_PKG = ["pkg/r/DESCRIPTION", "pkg/r/NAMESPACE", "pkg/r/R/.gitkeep", "pkg/r/tests/testthat.R",
          "pkg/r/tests/testthat/.gitkeep"]
 
@@ -41,6 +43,7 @@ def test_r_project(tmp_path):
     assert len(log.splitlines()) == 1
     hook = p / ".git/hooks/pre-commit"
     assert os.access(hook, os.X_OK) and "--gate slides" in hook.read_text()
+    assert ignored(p, "analysis/explore/out/result.csv")
     assert p.stat().st_gid == tmp_path.stat().st_gid
 
 

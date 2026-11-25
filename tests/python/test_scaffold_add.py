@@ -7,7 +7,7 @@ import pytest
 import scaffold
 from build_fixture import write
 from kitlib import KitError, load_config
-from scaffold import R_PKG_RULE, cmd_add_language, cmd_add_package, cmd_new, main
+from scaffold import R_PKG_RULE, cmd_add_language, cmd_add_package, cmd_add_params, cmd_new, main
 
 
 def sh(p, *args):
@@ -319,3 +319,91 @@ def test_untracked_renv_lock_not_committed_by_python_add(tmp_path):
     cmd_add_package("python", p)
     assert "?? renv.lock" in sh(p, "status", "--porcelain")
     assert "renv.lock" not in sh(p, "show", "--name-only", "--format=", "HEAD").split()
+
+
+def as_older_project(p):
+    """Undo what new projects get from the code spec: the parameter files, the reader, the ignore line and
+    the code gate in the hook."""
+    for rel in ("analysis/params.yml", "analysis/explore/params.yml", "analysis/params.R"):
+        sh(p, "rm", "-q", rel)
+    ignore = p / ".gitignore"
+    ignore.write_text(ignore.read_text().replace("analysis/explore/out/\n", ""))
+    sh(p, "add", ".gitignore")
+    sh(p, "commit", "-q", "--no-verify", "-m", "as an older project")
+    hook = p / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\n# research-kit numbers gate (old)\nexit 0\n")
+
+
+def test_add_params_fills_in_an_older_project(tmp_path, capsys):
+    p = cmd_new("demo", tmp_path, ["r"])
+    as_older_project(p)
+    write(p / "notes" / "draft.md", "uncommitted\n")
+    assert cmd_add_params(p) == ["analysis/params.yml", "analysis/explore/params.yml", "analysis/params.R",
+                                 ".gitignore"]
+    assert "Add the parameter files and readers" in sh(p, "log", "-1", "--format=%s")
+    assert sh(p, "status", "--porcelain") == "?? notes/draft.md\n"
+    assert "analysis/explore/out/" in (p / ".gitignore").read_text().splitlines()
+    assert not (p / "analysis" / "params.py").exists()
+    assert "lint_code.py" in (p / ".git" / "hooks" / "pre-commit").read_text()
+    assert "the code gate is on" in capsys.readouterr().out
+    assert cmd_add_params(p) == [] and "all there" in capsys.readouterr().out
+    assert main(["add-params", "--project", str(p)]) == 0
+
+
+def test_add_params_refuses_a_file_it_did_not_write(tmp_path):
+    p = cmd_new("demo", tmp_path, ["r"])
+    as_older_project(p)
+    write(p / "analysis" / "params.yml", "model:\n  lags: 3\n")
+    sh(p, "add", "analysis/params.yml")
+    sh(p, "commit", "-q", "--no-verify", "-m", "the project's own params.yml")
+    with pytest.raises(KitError, match="analysis/params.yml already exists and is not the kit's"):
+        cmd_add_params(p)
+    assert not (p / "analysis" / "params.R").exists() and (p / "analysis" / "params.yml").read_text() == \
+        "model:\n  lags: 3\n"
+
+
+def test_add_language_keeps_the_projects_own_reader(tmp_path, capsys):
+    p = cmd_new("demo", tmp_path, ["python"])
+    write(p / "analysis" / "params.R", "# our own settings\nlags <- 3\n")
+    sh(p, "add", "analysis/params.R")
+    sh(p, "commit", "-q", "--no-verify", "-m", "our own params.R")
+    cmd_add_language("r", p)
+    assert (p / "analysis" / "params.R").read_text() == "# our own settings\nlags <- 3\n"
+    assert "kept your own analysis/params.R" in capsys.readouterr().out
+
+
+def test_add_params_in_a_linked_worktree_leaves_the_hook_alone(tmp_path, capsys):
+    p = cmd_new("demo", tmp_path, ["r"])
+    as_older_project(p)
+    wt = tmp_path / "demo-wt"
+    sh(p, "worktree", "add", "-q", str(wt), "-b", "params")
+    old_hook = (p / ".git" / "hooks" / "pre-commit").read_text()
+    assert "analysis/params.yml" in cmd_add_params(wt)
+    assert (p / ".git" / "hooks" / "pre-commit").read_text() == old_hook
+    assert f"run scaffold.py install-hooks there ({p})" in capsys.readouterr().out
+
+
+def test_add_params_respects_an_existing_ignore_rule_and_pending_edits(tmp_path, capsys):
+    p = cmd_new("demo", tmp_path, ["r"])
+    as_older_project(p)
+    ignore = p / ".gitignore"
+    ignore.write_text(ignore.read_text() + "/analysis/explore/out\n")
+    sh(p, "commit", "-q", "--no-verify", "-am", "our own way of ignoring it")
+    assert ".gitignore" not in cmd_add_params(p)
+    assert ignore.read_text().count("explore/out") == 1
+    q = cmd_new("demo2", tmp_path, ["r"])
+    as_older_project(q)
+    (q / ".gitignore").write_text((q / ".gitignore").read_text() + "scratch/\n")     # uncommitted edit
+    capsys.readouterr()
+    assert ".gitignore" not in cmd_add_params(q)
+    assert "add the line analysis/explore/out/ to it yourself" in capsys.readouterr().out
+    assert sh(q, "status", "--porcelain", "--", ".gitignore").startswith(" M")
+
+
+def test_add_params_with_a_shared_hooks_path_still_succeeds(tmp_path, capsys):
+    p = cmd_new("demo", tmp_path, ["r"])
+    as_older_project(p)
+    sh(p, "config", "core.hooksPath", str(tmp_path / "shared-hooks"))
+    assert main(["add-params", "--project", str(p)]) == 0
+    out = capsys.readouterr().out
+    assert "add-params: committed" in out and "the code gate is off: " in out and "core.hooksPath" in out

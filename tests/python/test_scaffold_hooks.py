@@ -15,6 +15,8 @@ def test_new_project_hook_calls_the_stable_launcher(tmp_path):
     p = cmd_new("demo", tmp_path, ["r"])
     hook = (p / ".git" / "hooks" / "pre-commit").read_text()
     assert f'exec "{stable_kit()}" lint_numbers.py --project "{p}" --gate slides --precommit' in hook
+    assert f'"{stable_kit()}" lint_code.py --project "{p}" --precommit || exit $?' in hook
+    assert hook.index("lint_code.py") < hook.index("lint_numbers.py")
     assert ".venv/bin/python" not in hook
 
 
@@ -27,6 +29,8 @@ def test_install_hooks_rewrites_both_hooks(tmp_path, capsys):
     done = cmd_install_hooks(p)
     assert done == [p / ".git/hooks/pre-commit", p / "paper/.git/hooks/pre-commit"]
     assert "--gate paper" in (p / "paper/.git/hooks/pre-commit").read_text()
+    assert "lint_code.py" not in (p / "paper/.git/hooks/pre-commit").read_text()
+    assert "lint_code.py" in (p / ".git/hooks/pre-commit").read_text()
     assert str(stable_kit()) in (p / ".git/hooks/pre-commit").read_text()
 
 
@@ -125,3 +129,19 @@ def test_the_printed_attach_command_is_quoted(tmp_path, capsys):
     root.mkdir()
     assert main(["new", "demo", "--root", str(root), "--lang", "r"]) == 0
     assert f"--project {shlex.quote(str(root / 'demo'))}" in capsys.readouterr().out
+
+
+def test_the_code_gate_blocks_a_typed_value(tmp_path):
+    p = cmd_new("demo", tmp_path, ["r"])
+    (p / "analysis" / "run.R").write_text('x <- subset(d, year > 2019)\n')
+    subprocess.run(["git", "-C", str(p), "add", "analysis/run.R"], check=True)
+    proc = subprocess.run(["git", "-C", str(p), "commit", "-q", "-m", "typed"], capture_output=True, text=True)
+    assert proc.returncode != 0 and "analysis/run.R:1: typed number 2019" in proc.stdout + proc.stderr
+
+
+def test_install_hooks_notes_missing_parameter_files(tmp_path, capsys):
+    p = cmd_new("demo", tmp_path, ["r"])
+    subprocess.run(["git", "-C", str(p), "rm", "-q", "analysis/params.yml"], check=True)
+    subprocess.run(["git", "-C", str(p), "commit", "-q", "-m", "no parameters"], check=True)
+    cmd_install_hooks(p)
+    assert "note: the code gate is on, but analysis/params.yml is missing" in capsys.readouterr().out

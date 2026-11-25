@@ -4,7 +4,8 @@ from pathlib import Path
 
 KIT = Path(__file__).resolve().parents[2]
 REVIEW = KIT / "plugins" / "kit" / "templates" / "review"
-PLACEHOLDERS = {"PROJECT", "START", "START_HOW", "HEAD", "REVIEWED", "STATE", "FILES", "CONTEXT", "PLAN", "AUTHOR"}
+PLACEHOLDERS = {"PROJECT", "START", "START_HOW", "HEAD", "REVIEWED", "STATE", "FILES", "CONTEXT", "PLAN", "AUTHOR",
+                "CODE_MAP"}
 
 
 def objects(node):

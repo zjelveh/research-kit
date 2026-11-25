@@ -5,7 +5,7 @@ description: Use when recording a research idea, conjecture, memo or notation ch
 
 # Research notes
 
-Three kinds of notes live in `${CLAUDE_PROJECT_DIR}/notes/`. Edits to existing text are prose edits: show the full before and after, and apply only with approval.
+Three kinds of notes live in `${CLAUDE_PROJECT_DIR}/notes/`. Edits to existing text are prose edits: show the full before and after, and apply only with approval. The paper's argument (`notes/argument.md`) and the approved section outlines (`notes/outlines/`) are `/kit:writing`'s; change them there.
 
 ## Research questions: `notes/research_questions.md`
 

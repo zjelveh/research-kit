@@ -128,3 +128,16 @@ def test_a_failed_relink_leaves_no_temporary_link(monkeypatch, tmp_path):
     monkeypatch.undo()
     link.unlink()
     link.symlink_to(PLUGIN_ROOT)
+
+
+def test_figure_style_and_idioms_are_items():
+    assert item_rel("figure-style") == Path("figure-style.md")
+    assert item_rel("idiom", "dot-plot") == Path("idioms") / "dot-plot.md"
+    with pytest.raises(KitError, match="idiom name"):
+        item_rel("idiom", "Bad Name")
+    assert in_effect("figure-style") == (DEFAULTS / "figure-style.md", "default")
+
+
+def test_writing_patterns_is_an_item():
+    assert item_rel("writing-patterns") == Path("writing-patterns.md")
+    assert in_effect("writing-patterns") == (DEFAULTS / "writing-patterns.md", "default")

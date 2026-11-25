@@ -1,5 +1,6 @@
 paper/
 notes/lit/pdfs/
+analysis/explore/out/
 *.log
 state/.session_id
 state/.sessions/

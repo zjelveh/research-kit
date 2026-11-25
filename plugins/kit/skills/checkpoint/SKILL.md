@@ -72,6 +72,12 @@ Quick mode, then:
 5. **Promotion candidates**: list rules in the project `CLAUDE.md` that look general, meaning they name no file, dataset or paper term, as candidates to promote with `/kit:learn`. Don't move them.
 6. **Hook log**: trim `state/.hook.log` to its last 500 lines.
 7. **Environments**: for each language in `research.yml`, report whether its dependencies and lockfile agree. Python: `uv lock --check` from the project root (exit 1 means `pyproject.toml` and `uv.lock` disagree). R: `Rscript -e 'renv::status()'` from the project root. It exits 0 either way, so read its output: anything other than "No issues found" is drift (for example, packages the code uses that aren't installed in the project library, or that `renv.lock` doesn't record). Report only; never run `uv lock`, `uv sync` or `renv::snapshot()` here.
+8. **Code map**: list the code files this session changed, committed or not, from its start record's `code_head` (see Identify the session): `git -C "${CLAUDE_PROJECT_DIR}" diff --name-only <code_head> -- '*.R' '*.r' '*.py'` together with `git -C "${CLAUDE_PROJECT_DIR}" ls-files --others --exclude-standard -- '*.R' '*.r' '*.py'`; when `code_head` is `null`, `git -C "${CLAUDE_PROJECT_DIR}" ls-files --cached --others --exclude-standard -- '*.R' '*.r' '*.py'`. If there are none, report "code map: no code changed" and skip the rest of this step. Otherwise run
+   ```
+   "${CLAUDE_PLUGIN_ROOT}/bin/kit" code_map.py --project "${CLAUDE_PROJECT_DIR}" --files <those files> --base <code_head>
+   ```
+   with `--base none` when `code_head` is `null`, so that typed values committed during the session count too.
+   Then report its summary line, any warning line, and the items it lists. Report only. If it exits 2, report its error line and go on: this step never stops the checkpoint.
 
 ## Commit
 
@@ -87,18 +93,18 @@ git -C "${CLAUDE_PROJECT_DIR}" commit -m "Checkpoint <YYYY-MM-DD>" -- <paths>
 
 ## Report
 
-End with: the checkpoint commit, what changed in each state file, the size against the allotment, the review status line from `"${CLAUDE_PLUGIN_ROOT}/bin/kit" codex_review.py --project "${CLAUDE_PROJECT_DIR}" --status`, and in full mode the findings from steps 1–7.
+End with: the checkpoint commit, what changed in each state file, the size against the allotment, the review status line from `"${CLAUDE_PLUGIN_ROOT}/bin/kit" codex_review.py --project "${CLAUDE_PROJECT_DIR}" --status`, and in full mode the findings from steps 1–8.
 
 ## Done when
 - [ ] This conversation's start record exists and matches its id, and its entry is added or updated in place.
 - [ ] Goal, Blocker (with its command) and Next steps are current.
 - [ ] At most three session entries remain; older ones are in `state/archive/`.
 - [ ] `check_state_size.py` exits 0, and the size was reported.
-- [ ] Full mode: approved decisions added and the index regenerated; pointers, ledger, repos, promotion candidates, the hook log and environments handled and reported.
+- [ ] Full mode: approved decisions added and the index regenerated; pointers, ledger, repos, promotion candidates, the hook log, environments and the code map handled and reported.
 - [ ] The files this skill changed are committed, and nothing else; nothing was pushed.
 
 ## Stop and ask
 - `$ARGUMENTS` is not empty, `quick` or `full`.
 - This conversation's start record is missing, or its id differs from `${CLAUDE_SESSION_ID}`.
-- A script exits 2.
+- A script exits 2 (except the code map in step 8).
 - `CURRENT_STATE.md` can only fit its allotment by cutting the Goal, the Blocker or live next steps.
