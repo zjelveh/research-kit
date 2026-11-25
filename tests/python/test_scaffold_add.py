@@ -428,3 +428,17 @@ def test_add_params_leaves_a_reader_being_edited(tmp_path, capsys):
     assert cmd_add_params(p) == []
     assert reader.read_text().endswith("# a local note\n")
     assert "params.R has uncommitted changes, so it was left as it is" in capsys.readouterr().out
+
+
+def test_add_params_refreshes_a_kit_reader_for_an_undeclared_language(tmp_path, capsys):
+    p = cmd_new("demo", tmp_path, ["python"])
+    reader = p / "analysis" / "params.R"                       # R code the project runs outside `languages`
+    reader.write_text("# The project's parameters, written by research-kit (an older version).\n"
+                      "param <- function(n) n\n")
+    sh(p, "add", "analysis/params.R")
+    sh(p, "commit", "-q", "--no-verify", "-m", "a hand-copied reader")
+    assert "analysis/params.R" in cmd_add_params(p)
+    assert "param_path" in reader.read_text()
+    assert "updated the kit's reader analysis/params.R" in capsys.readouterr().out
+    own = p / "analysis" / "params.py"
+    assert cmd_add_params(p) == [] and own.exists()

@@ -553,8 +553,9 @@ def cmd_add_package(lang: str, project: Path, name: str | None = None) -> None:
 
 def cmd_add_params(project: Path) -> list[str]:
     """Bring a project made before the code spec up to it (code spec §6): write the parameter files and the
-    readers for its languages that it lacks, ignore analysis/explore/out/, and commit only those files; then
-    rewrite the code repo's kit hook so the code gate runs. A file of the same name that the kit didn't
+    readers for its languages that it lacks, refresh any kit reader from an older kit (whatever its
+    language), ignore analysis/explore/out/, and commit only those files; then rewrite the code repo's kit
+    hook so the code gate runs. A file of the same name that the kit didn't
     write is the project's own: nothing is written, and the user renames it first."""
     project = find_project(Path(os.path.abspath(project)))
     require_toplevel(project)
@@ -562,6 +563,9 @@ def cmd_add_params(project: Path) -> list[str]:
     wanted = {rel: TEMPLATES / "project" / rel for rel in PARAM_FILES}
     wanted |= {rel: TEMPLATES / "params" / Path(rel).name for lang, rel in READERS.items()
                if lang in cfg["languages"]}
+    # a kit reader already there is kept current even for a language the project doesn't declare
+    wanted |= {rel: TEMPLATES / "params" / Path(rel).name for rel in READERS.values()
+               if rel not in wanted and (project / rel).exists() and kits_file(project / rel)}
     foreign = [rel for rel in wanted if (project / rel).exists() and not kits_file(project / rel)]
     if foreign:
         raise KitError(f"{', '.join(foreign)} already exist{'s' if len(foreign) == 1 else ''} and "
