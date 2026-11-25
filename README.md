@@ -34,7 +34,7 @@ flowchart TB
         talks["slides: Beamer talks"]
         notes["notes: argument, outlines, memos, literature, figure specs"]
         state["state: current state, decisions"]
-        codegate{{"code gate: no typed numbers, dates or paths"}}
+        codegate{{"code gate: no typed numbers, dates or paths; no functions in pipeline scripts"}}
         gate{{"numbers gate: no hand-typed numbers"}}
         params --> code --> make --> numbers
         numbers --> paper
@@ -57,7 +57,7 @@ flowchart TB
 ```
 
 - **Session start.** Every session in a kit project begins with the rules, the project's current state (`state/CURRENT_STATE.md`) and a status block: uncommitted changes, new commits on Overleaf, hand-typed numbers in the paper and the slides, and the code review status. Outside kit projects the kit does nothing.
-- **Analysis code.** Before writing code, `/kit:code` has Claude read a map of the project's shared functions and parameters. The library is the paper's code as it will be released, and pipeline scripts only call it. A quick question gets a short, dated script in `analysis/explore/` that calls the library, instead of a fresh copy of the loading and sample logic.
+- **Analysis code.** The project's library is the paper's code as it will be released: every step that produces a result in the paper is a function there, and pipeline scripts are thin drivers that call it. Before writing code, `/kit:code` has Claude read a map of the library's functions and the parameters. A quick question gets a short, dated script in `analysis/explore/` that calls the library, instead of a fresh copy of the loading and sample logic. A git hook blocks a commit that adds a function to a pipeline script.
 - **Parameters.** Every number, date and path the code uses lives in `analysis/params.yml`, with a comment saying what it is and why, and code reads it with `param("name")`. A git hook blocks a commit that types such a value on a new or edited line.
 - **Generated numbers.** Each language's `make_numbers` script writes `numbers.tex`, one LaTeX macro per result, and the claims ledger records which script produced each one. The paper and the talks use the macros. A git hook blocks a commit that adds a hand-typed number to the paper or the slides.
 - **Figures.** `/kit:figures` records each figure's data, the reader's task and the chosen idiom in a short spec, checks the design against a catalogue of 52 visualization idioms, and only then writes the plotting code.
@@ -101,7 +101,8 @@ my-paper/
 │   ├── params.yml            every number, date and path the code uses
 │   ├── params.R, params.py   the readers that give code param("name"), one per language
 │   ├── explore/              dated scripts for quick questions, with their own params.yml
-│   └── numbers/              make_numbers.R or .py, which write the paper's numbers
+│   ├── numbers/              make_numbers.R or .py, which write the paper's numbers
+│   └── run_all.R or .py      runs the pipeline's driver scripts in order, once the project has some
 ├── pkg/                      the project's own R or Python package, if it has one
 ├── paper/                    git clone of the Overleaf project
 │   └── generated/            numbers.tex and notation.tex, written by the kit
@@ -130,7 +131,7 @@ my-paper/
 
 ## Analysis code and parameters
 
-**The library.** The library is the paper's code as it will be released: every step that produces a result in the paper (data preparation, samples, estimation, the computations behind each number, the tables and the figures) is a function there. It is the project's package under `pkg/`, or the folders and files named in `library:` in `.claude/research.yml`, such as `library: [analysis/R]`. Pipeline scripts are thin drivers that read parameters, call the library in order and write outputs, and a run-all script runs them, so a replicator runs one command. A request calls the library; a library function that nearly fits is extended; a genuine one-off goes in an explore script that calls the library. `kit code_map.py --project .` prints the library's functions, with how many files call each one, and the parameters, with the scripts that use them. `--files <files>` checks changed files for typed values, repeated code, paper outputs with several writers and data read around the library; `--all` lists everything, for a clean-up.
+**The library.** The library is the paper's code as it will be released: every step that produces a result in the paper (data preparation, samples, estimation, the computations behind each number, the tables and the figures) is a function there. It is the project's package under `pkg/`, or the folders and files named in `library:` in `.claude/research.yml`, such as `library: [analysis/R]`. Pipeline scripts are thin drivers that read parameters, call the library in order and write outputs, and a run-all script runs them, so a replicator runs one command. The `make_numbers` scripts are drivers too: they read values from committed results, and anything they compute comes from a library function. A request calls the library; a library function that nearly fits is extended; a genuine one-off goes in an explore script that calls the library. `kit code_map.py --project .` prints the library's functions, with how many files call each one, and the parameters, with the scripts that use them. `--files <files>` checks changed files for typed values, repeated code, paper outputs with several writers and data read around the library; `--all` lists everything, for a clean-up.
 
 **The parameter files.** `analysis/params.yml` holds what the pipeline uses, and a change to one of its values needs your approval. `analysis/explore/params.yml` holds the one-off values of quick questions. The format is a small subset of YAML that R and Python read without packages:
 

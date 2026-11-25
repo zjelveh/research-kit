@@ -97,3 +97,30 @@ These are rare edge cases that have been accepted rather than fixed. The bar for
 - Under a temp root other than the current one, a dead run's `kit-review-*` folder can keep its `pid` file after its copy is unregistered.
 - A changed file whose name isn't valid UTF-8 makes the review status line an ERROR (at session start and in `/kit:checkpoint`) until the file is renamed.
 - `finished` in `meta.json` is local time without a UTC offset. "Newest" can misorder reviews written on two machines in different time zones, or across a daylight-saving change.
+
+## Code gate (`lint_code.py`)
+
+### Not caught (accepted; the skill and `/kit:review` cover them)
+
+- **Values that aren't numbers, dates or paths,** such as a clustering variable or a kernel name: no check can tell them from column names.
+- **Paths built from pieces** (`file.path("data", "clean")`), **years typed as strings** (`"2019"`), and dates written in words.
+- **Functions defined in unusual ways:** R `assign()`, `<<-`, `local(function(...))`, or `function` on the line after `<-`; Python `def` inside a top-level `if`, `try` or `with`. The skill says never to use these to get past the check.
+- **A squash merge** has no `MERGE_HEAD`, so every line it brings counts as added.
+
+### Blocked although legitimate (end the line with `# literal: <reason>`, or move the code)
+
+- **Strings with a slash and no spaces** count as paths, so a label like `"Black/White"` is flagged. A URL is flagged on purpose: it is a data location.
+- **Command-line functions** (click or typer commands) in a pipeline script are blocked; they belong in the library, with the script calling them.
+- **A file moved with heavy edits** (under git's 50% similarity) counts as new, so its old functions and typed values are flagged too.
+
+### Behaviour notes
+
+- The run-all exemption applies to any file named `run_all.R` or `run_all.py`, wherever it is.
+- In R, a one-element list parameter can't be told from a single string, so `param_path()` accepts `['a.csv']` in R and refuses it in Python.
+- The readers find their files from their own place. In R that is the innermost `source()` that loaded `params.R`, or else the project folder above the working directory.
+
+## Code map (`code_map.py`)
+
+- Caller counts, parameter users and paper-output writers are found by text, not by running code. A name built at run time is missed.
+- Repeats are blocks of six or more lines after spacing and comments are dropped. A copy with a renamed variable doesn't count as a repeat.
+- A direct read of library data is reported only for data that a library loader reads, through `param()` or as an argument.
