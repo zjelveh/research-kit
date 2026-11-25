@@ -109,3 +109,9 @@ def test_checkpoint_reports_the_code_map_and_the_readme_lists_code():
     assert "8. **Code map**" in text and "steps 1–8" in text
     readme = (KIT / "README.md").read_text()
     assert "| `/kit:code` |" in readme and "explore/" in readme and "/kit:figures, /kit:code," in readme
+
+
+def test_code_skill_makes_the_library_the_released_code():
+    text = (SKILLS / "code" / "SKILL.md").read_text()
+    assert "the paper's code as it will be released" in text and "thin drivers" in text
+    assert "**(hard rule)** A pipeline script defines no function" in text and "run-all script" in text

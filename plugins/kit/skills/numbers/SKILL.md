@@ -30,7 +30,7 @@ Not a result, so `%num-ok` at the end of the line is allowed, with approval: a d
    ```
    The source's path is a parameter in `analysis/params.yml` (`/kit:code`), never typed: the scripts load `param()` at the top. A script made before the parameter files needs `source("analysis/params.R")` (R) or `sys.path.insert(0, "analysis")` and `from params import param` (Python) added after its emit lines; if `analysis/params.yml` is missing, run `"${CLAUDE_PLUGIN_ROOT}/bin/kit" scaffold.py add-params` first.
    - `name`: letters only, camelCase, starting lowercase, unique across both scripts. The macro name is the claim's stable id, so don't rename a macro that is in use.
-   - `value`: read or computed from `src` in the script, never a typed literal.
+   - `value`: read from `src`, or computed from it by a library function, never a typed literal. The numbers script is a driver like any other (`/kit:code`): it defines no functions, so a helper such as a percent formatter belongs in the library.
    - `format`: an `sprintf` format in R, a `%` format in Python. Use number formats (`%.2f`; `%d` only for whole numbers) for numbers, and `%s` only for strings: `%s` prints doubles differently in R and Python.
 3. **Generate.** Run:
    ```
@@ -46,7 +46,7 @@ Tables and figures are written by code into the paper's `tables/` and `figures/`
 
 ## When a commit is blocked
 
-In the code repo, the hook runs the code check first: a block that starts `code gate: N findings` is about typed values in code, and `/kit:code` says what to do. The numbers check follows. The pre-commit hook in each repo (paper: `paper/.lint_baseline`; code: `.lint_baseline_slides`) prints:
+In the code repo, the hook runs the code check first: a block that starts `code gate: N findings` is about typed values or functions defined in a pipeline script, and `/kit:code` says what to do. The numbers check follows. The pre-commit hook in each repo (paper: `paper/.lint_baseline`; code: `.lint_baseline_slides`) prints:
 
 ```
 paper [index]: count=N baseline=B REGRESSION

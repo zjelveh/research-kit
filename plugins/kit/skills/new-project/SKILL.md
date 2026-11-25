@@ -65,7 +65,7 @@ Tell the user:
 - The paper's preamble needs `\input{generated/numbers.tex}` and `\input{generated/notation.tex}`. That is a manuscript edit, made through `/kit:writing`.
 - Seed `notes/research_questions.md` with `/kit:notes`.
 - A language or package can be added later from the project root: `"${CLAUDE_PLUGIN_ROOT}/bin/kit" scaffold.py add-language r|python`, or `"${CLAUDE_PLUGIN_ROOT}/bin/kit" scaffold.py add-package r|python [--name NAME]`.
-- Shared code (loaders, sample definitions) lives in the project's package, or in folders or files named in `library:` in `.claude/research.yml`; every number, date and path the code uses lives in `analysis/params.yml`. `/kit:code` reads both before writing code. A project made before these files existed gets them with `"${CLAUDE_PLUGIN_ROOT}/bin/kit" scaffold.py add-params`.
+- The paper's code, as it will be released, lives in the project's library: its package, or folders or files named in `library:` in `.claude/research.yml`. Pipeline scripts are thin drivers that call it; every number, date and path the code uses lives in `analysis/params.yml`. `/kit:code` reads both before writing code. A project made before these files existed gets them with `"${CLAUDE_PLUGIN_ROOT}/bin/kit" scaffold.py add-params`.
 
 ## Done when
 - [ ] `kit setup` succeeded.

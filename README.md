@@ -57,7 +57,7 @@ flowchart TB
 ```
 
 - **Session start.** Every session in a kit project begins with the rules, the project's current state (`state/CURRENT_STATE.md`) and a status block: uncommitted changes, new commits on Overleaf, hand-typed numbers in the paper and the slides, and the code review status. Outside kit projects the kit does nothing.
-- **Analysis code.** Before writing code, `/kit:code` has Claude read a map of the project's shared functions and parameters. A quick question gets a short, dated script in `analysis/explore/` that calls the project's library, instead of a fresh copy of the loading and sample logic. What defines the data (loading, cleaning, samples, variables) goes into the library, with tests.
+- **Analysis code.** Before writing code, `/kit:code` has Claude read a map of the project's shared functions and parameters. The library is the paper's code as it will be released, and pipeline scripts only call it. A quick question gets a short, dated script in `analysis/explore/` that calls the library, instead of a fresh copy of the loading and sample logic.
 - **Parameters.** Every number, date and path the code uses lives in `analysis/params.yml`, with a comment saying what it is and why, and code reads it with `param("name")`. A git hook blocks a commit that types such a value on a new or edited line.
 - **Generated numbers.** Each language's `make_numbers` script writes `numbers.tex`, one LaTeX macro per result, and the claims ledger records which script produced each one. The paper and the talks use the macros. A git hook blocks a commit that adds a hand-typed number to the paper or the slides.
 - **Figures.** `/kit:figures` records each figure's data, the reader's task and the chosen idiom in a short spec, checks the design against a catalogue of 52 visualization idioms, and only then writes the plotting code.
@@ -85,7 +85,7 @@ claude plugin install kit@research-kit
 
 The `/kit:` skills are available in every project. The session-start hook runs only in kit projects (folders with `.claude/research.yml`) and is silent everywhere else.
 
-To update: `claude plugin marketplace update research-kit`, then `claude plugin update kit@research-kit`. A project made with an earlier version gets the parameter files and the code gate with `kit scaffold.py add-params`; see [Analysis code and parameters](#analysis-code-and-parameters).
+To update: `claude plugin marketplace update research-kit`, then `claude plugin update kit@research-kit`. A project made with an earlier version gets the parameter files and the code gate with `kit scaffold.py add-params`, and running it again after an update refreshes the kit's readers; see [Analysis code and parameters](#analysis-code-and-parameters).
 
 ## Quick start
 
@@ -121,7 +121,7 @@ my-paper/
 | `/kit:lit` | Literature map, verified `.bib` entries and saved searches | Searching, adding or citing literature |
 | `/kit:numbers` | Generated number macros and the numbers check | Adding a number, table or figure, or a commit blocked by the numbers check |
 | `/kit:figures` | Designs a figure from its data and the reader's task with Munzner's idioms, or critiques an existing one | Making or reviewing a figure |
-| `/kit:code` | Reads the project's code map first, keeps definitions in the project's library and every number, date and path in its parameter files, and answers quick questions with dated explore scripts; a pre-commit check blocks typed values | Writing or changing analysis code, or a commit blocked by the code gate |
+| `/kit:code` | Reads the project's code map first, keeps definitions in the project's library and every number, date and path in its parameter files, and answers quick questions with dated explore scripts; a pre-commit check blocks typed values and functions in pipeline scripts | Writing or changing analysis code, or a commit blocked by the code gate |
 | `/kit:writing` | Works from the paper's argument to a section outline, a whole-section draft and line edits, with the voice, writing patterns and venue rules | Drafting or editing manuscript prose |
 | `/kit:slides` | Beamer talks from the kit's template, slide by slide | Creating or revising a talk |
 | `/kit:review` | Codex reviews the change; Claude checks every finding and proposes fixes for approval | Before reporting a change to 2+ code files as done |
@@ -130,7 +130,7 @@ my-paper/
 
 ## Analysis code and parameters
 
-**The library.** Shared code (loaders, sample definitions, how each reported quantity is computed) lives in the project's library: its package under `pkg/`, or the folders and files named in `library:` in `.claude/research.yml`, such as `library: [analysis/R]`. `kit code_map.py --project .` prints the library's functions, with how many files call each one, and the parameters, with the scripts that use them. `--files <files>` checks changed files for typed values, repeated code, paper outputs with several writers and data read around the library; `--all` lists everything, for a clean-up.
+**The library.** The library is the paper's code as it will be released: every step that produces a result in the paper (data preparation, samples, estimation, the computations behind each number, the tables and the figures) is a function there. It is the project's package under `pkg/`, or the folders and files named in `library:` in `.claude/research.yml`, such as `library: [analysis/R]`. Pipeline scripts are thin drivers that read parameters, call the library in order and write outputs, and a run-all script runs them, so a replicator runs one command. A request calls the library; a library function that nearly fits is extended; a genuine one-off goes in an explore script that calls the library. `kit code_map.py --project .` prints the library's functions, with how many files call each one, and the parameters, with the scripts that use them. `--files <files>` checks changed files for typed values, repeated code, paper outputs with several writers and data read around the library; `--all` lists everything, for a clean-up.
 
 **The parameter files.** `analysis/params.yml` holds what the pipeline uses, and a change to one of its values needs your approval. `analysis/explore/params.yml` holds the one-off values of quick questions. The format is a small subset of YAML that R and Python read without packages:
 
@@ -143,11 +143,15 @@ panel_years: [1990, 2019]
 analysis_data: 'data/analysis.parquet'
 ```
 
-Each entry has a comment line above it. Values are numbers, single-quoted strings (dates and paths always quoted), `true` or `false`, or a one-line list. Scripts run from the project root and read values with `param("min_group_size")`, after `source("analysis/params.R")` in R or `sys.path.insert(0, "analysis")` and `from params import param` in Python. An unknown name is an error. A package can't read the parameter files, since it has to work outside the paper; its functions take values as arguments, and the calling script passes `param(...)`.
+Each entry has a comment line above it. Values are numbers, single-quoted strings (dates and paths always quoted), `true` or `false`, or a one-line list. Scripts read values with `param("min_group_size")`, after `source("analysis/params.R")` in R or, in Python, putting `analysis/` on `sys.path` and `from params import param, param_path`. `param_path("analysis_data")` gives a path parameter joined to the project root. The readers find the parameter files from their own place, so scripts may run from any folder in the project. An unknown name, or a missing `analysis/params.yml`, is an error. A package can't read the parameter files, since it has to work outside the paper; its functions take values as arguments, and the calling script passes `param(...)`.
 
-**The code gate.** The code repo's pre-commit hook flags, on the lines a commit adds or changes: numbers other than 0, 1, 2 and 100, dates, and paths or file names. Tests, archived code (`archive/`, `legacy/`), `renv/` and hidden folders are exempt. A line that has to keep a value ends with `# literal: <reason>`, which `/kit:review` sees. `kit lint_code.py --project . --all` counts a project's existing typed values by file.
+**The code gate.** The code repo's pre-commit hook flags, on the lines a commit adds or changes:
+- numbers other than 0, 1, 2 and 100, dates, and paths or file names. A line that has to keep a value ends with `# literal: <reason>`, which `/kit:review` sees;
+- a new function or class defined in a pipeline script (a driver's `main` or `parse_args` aside). Functions belong in the library. The library, packages, explore scripts and the run-all script may define them, and a function a script already had may still be edited.
 
-**Projects made before these files.** Run `kit scaffold.py add-params` in the project. It adds the parameter files and readers the project lacks, ignores `analysis/explore/out/`, commits those files, and turns the code gate on. It refuses, and changes nothing, if the project has its own file of the same name. Existing code keeps committing: only new and edited lines are checked.
+Tests, archived code (`archive/`, `legacy/`), `renv/` and hidden folders are exempt from both. `kit lint_code.py --project . --all` counts a project's existing findings by file.
+
+**Projects made before these files.** Run `kit scaffold.py add-params` in the project. It adds the parameter files and readers the project lacks, ignores `analysis/explore/out/`, commits those files, and turns the code gate on. It refuses, and changes nothing, if the project has its own file of the same name. Existing code keeps committing: only new and edited lines are checked, and a function a script already had may still be edited.
 
 ## Changing the defaults
 

@@ -21,6 +21,8 @@ DATE = re.compile(r"\d{4}-\d{2}(-\d{2}([ T]\d{2}:\d{2}(:\d{2})?)?)?")
 R_DEF = re.compile(r"([A-Za-z.][\w.]*)\s*(?:<-|=)\s*(?:function\s*\(|\\\()")
 R_ASSIGN = re.compile(r"([A-Za-z.][\w.]*)\s*(?:<-|=(?!=))")
 R_STRING = re.compile(r"\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'")
+ENTRY_POINTS = {"main", "parse_args"}                       # a driver's own entry, not analysis logic
+READER_FILES = {"analysis/params.R", "analysis/params.py"}  # where the kit writes its param() readers
 
 
 @dataclass
@@ -188,4 +190,31 @@ def py_functions(rel: str, tree: ast.Module) -> list[Func]:
             args = "" if isinstance(node, ast.ClassDef) else ast.unparse(node.args)
             doc = (ast.get_docstring(node) or "").strip()
             out.append(Func(node.name, args, rel, node.lineno, doc.splitlines()[0] if doc else ""))
+    return out
+
+
+def kits_reader(rel: str, text: str) -> bool:
+    """The kit's own param() reader (a project's own file of that name is project code)."""
+    return rel in READER_FILES and "research-kit" in "".join(text.splitlines(True)[:5])
+
+
+def top_level_definitions(rel: str, text: str) -> list[tuple[int, str]]:
+    """(line, name) of every top-level function, and in Python every class and named lambda, private names
+    included."""
+    if rel.endswith(".py"):
+        tree = parse_python(text)
+        if tree is None:
+            return []
+        out = [(n.lineno, n.name) for n in tree.body
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+        out += [(n.lineno, t.id) for n in tree.body if isinstance(n, (ast.Assign, ast.AnnAssign))
+                and isinstance(n.value, ast.Lambda)
+                for t in (n.targets if isinstance(n, ast.Assign) else [n.target]) if isinstance(t, ast.Name)]
+        return sorted(out)
+    out, depth = [], 0
+    for n, line in enumerate(text.splitlines(), 1):
+        code = split_comment(line)[0]
+        if depth == 0 and (m := R_DEF.match(line)):
+            out.append((n, m.group(1)))
+        depth = max(0, depth + depth_change(code))
     return out

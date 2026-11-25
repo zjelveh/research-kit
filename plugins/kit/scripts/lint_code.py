@@ -13,6 +13,7 @@ Flags, in R and Python code that is not a test or archived: numbers other than 0
 negatives), dates, and paths or file names. They belong in analysis/params.yml (or the explore file),
 read with param("name"). In a package (pkg/), a number may also be a function default or part of a
 top-level named constant, and param() is not used. A line that ends in `# literal: <reason>` is allowed.
+A pipeline script defines no function (main and parse_args aside): the paper's code lives in the library.
 Also checks the parameter files' format, and that every param("name") exists and that pipeline code uses no
 explore parameter. A moved file counts only its changed lines; in a merge, only lines new to both parents.
 Exit: 0 nothing found (always, with --all), 1 findings, 2 config or project error.
@@ -29,8 +30,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kit_params  # noqa: E402
-from code_scan import (CODE_SUFFIXES, DATE, FILE_EXT, R_ASSIGN, R_DEF, R_STRING, classify, code_files,  # noqa: E402
-                       depth_change, in_scope, library_folders, literals, parse_python, split_comment)
+from code_scan import (CODE_SUFFIXES, DATE, ENTRY_POINTS, FILE_EXT, R_ASSIGN, R_DEF, R_STRING, classify,  # noqa: E402
+                       code_files, depth_change, in_scope, kits_reader, library_folders, literals, parse_python,
+                       split_comment, top_level_definitions)
 from kitlib import KitError, find_project, git, load_config  # noqa: E402
 
 ALLOWED_NUMBERS = {0, 1, 2, 100}
@@ -41,7 +43,7 @@ FORMAT = re.compile(r"%[-+ #0]*\d*(?:\.\d+)?[a-zA-Z]")
 # conversion, merged hunks or binary treatment.
 DIFF = ("diff", "--no-ext-diff", "--no-color", "--no-textconv", "--text", "--inter-hunk-context=0", "-U0", "-M")
 CODE_PATHS = ("*.R", "*.r", "*.py")
-PARAM_CALL = re.compile(r"(?<![\w.])param\(\s*[\"']([^\"']*)[\"']\s*\)")
+PARAM_CALL = re.compile(r"(?<![\w.])param(?:_path)?\(\s*[\"']([^\"']*)[\"']\s*\)")
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", re.M)
 
 
@@ -156,15 +158,17 @@ def param_calls(rel: str, text: str) -> list[tuple[int, str]]:
         tree = parse_python(text)
         return [] if tree is None else [
             (n.lineno, n.args[0].value) for n in ast.walk(tree)
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "param" and n.args
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("param", "param_path")
+            and n.args
             and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str)]
     return [(n, name) for n, line in enumerate(text.splitlines(), 1)
             for name in PARAM_CALL.findall(split_comment(line)[0])]
 
 
 def lint_text(rel: str, text: str, cls: str, lines: set[int] | None, pipe: dict, expl: dict,
-              hints: dict) -> list[str]:
-    """Findings, as `file:line: message`, for the given lines of one code file (all when lines is None)."""
+              hints: dict, old_defs: set[str] = frozenset()) -> list[str]:
+    """Findings, as `file:line: message`, for the given lines of one code file (all when lines is None).
+    A function the file already defined before (old_defs) may be edited."""
     if cls in ("test", "archive"):
         return []
     package = rel.startswith("pkg/")
@@ -189,6 +193,11 @@ def lint_text(rel: str, text: str, cls: str, lines: set[int] | None, pipe: dict,
             elif name not in pipe and cls != "explore":
                 out.append(f"{rel}:{n}: param('{name}') is an explore parameter; pipeline code uses "
                            f"{kit_params.PIPELINE} only")
+    run_all = Path(rel).stem == "run_all"           # the run-all script may keep a small step-runner
+    if cls == "pipeline" and not package and not run_all and not kits_reader(rel, text):
+        out += [f"{rel}:{n}: defines {name}() in a pipeline script: the paper's code goes in the library, and the "
+                "script calls it" for n, name in top_level_definitions(rel, text)
+                if (lines is None or n in lines) and name not in ENTRY_POINTS and name not in old_defs]
     return out
 
 
@@ -219,10 +228,10 @@ def _hunk_lines(diff: str) -> set[int]:
     return lines
 
 
-def added_lines(project: Path, against: list[str], only: set[str] | None = None) -> dict[str, set[int]]:
-    """{path: added line numbers} for the code files that `git diff <against>` shows (`--cached` among them
-    for the index). Names come from -z output, so any file name works; a moved file counts only its edited
-    lines, because each file is diffed together with the path it moved from."""
+def changes(project: Path, against: list[str], only: set[str] | None = None) -> dict[str, tuple[set[int], str]]:
+    """{path: (added line numbers, the path it had before)} for the code files that `git diff <against>` shows
+    (`--cached` among them for the index). Names come from -z output, so any file name works; a moved file
+    counts only its edited lines, because each file is diffed together with the path it moved from."""
     status = _git_text(project, *DIFF, "--name-status", "-z", "--diff-filter=ACMR", *against, "--", *CODE_PATHS)
     fields, out, i = status.split("\0"), {}, 0
     while i < len(fields) and fields[i]:
@@ -232,17 +241,34 @@ def added_lines(project: Path, against: list[str], only: set[str] | None = None)
         new = paths[-1]
         if only is None or new in only:
             diff = _git_text(project, *DIFF, *against, "--", *(f":(literal){p}" for p in paths))
-            out[new] = _hunk_lines(diff)
+            out[new] = (_hunk_lines(diff), paths[0])
     return out
 
 
-def staged_lines(project: Path) -> dict[str, set[int]]:
-    """The lines the staged commit adds, by file. In a merge, only the lines new to both parents."""
-    added = added_lines(project, ["--cached"])
+def added_lines(project: Path, against: list[str], only: set[str] | None = None) -> dict[str, set[int]]:
+    return {f: lines for f, (lines, _) in changes(project, against, only).items()}
+
+
+def old_definitions(project: Path, revs: list[str], path: str) -> set[str]:
+    """Names a file's earlier versions already define, so that editing an old function's def line passes."""
+    names = set()
+    for rev in revs:
+        proc = subprocess.run(["git", "-C", str(project), "show", f"{rev}:{path}"], capture_output=True)
+        if proc.returncode == 0:
+            names |= {n for _, n in top_level_definitions(path, proc.stdout.decode("utf-8", "replace"))}
+    return names
+
+
+def staged_lines(project: Path) -> dict[str, tuple[set[int], set[str]]]:
+    """The lines the staged commit adds, and the names the file defined before, by file. In a merge, only the
+    lines new to both parents count, and a name either parent defined is old."""
+    found = changes(project, ["--cached"])
+    parents = ["HEAD"]
     if _git_text(project, "rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).strip():
-        theirs = added_lines(project, ["--cached", "MERGE_HEAD"], set(added))
-        added = {f: lines & theirs.get(f, set()) for f, lines in added.items()}
-    return added
+        theirs = changes(project, ["--cached", "MERGE_HEAD"], set(found))
+        found = {f: (lines & theirs.get(f, (set(), f))[0], old) for f, (lines, old) in found.items()}
+        parents.append("MERGE_HEAD")
+    return {f: (lines, old_definitions(project, parents, old)) for f, (lines, old) in found.items()}
 
 
 def precommit(project: Path) -> list[str]:
@@ -257,10 +283,10 @@ def precommit(project: Path) -> list[str]:
         print(f"note: {note}", file=sys.stderr)
     hints = _hints(pipe, expl)
     out = list(problems)
-    for f, lines in sorted(staged_lines(project).items()):
+    for f, (lines, old) in sorted(staged_lines(project).items()):
         cls = classify(f, library)
         if lines and in_scope(f, cfg) and cls not in ("test", "archive"):
-            out += lint_text(f, _git_text(project, "show", f":{f}"), cls, lines, pipe, expl, hints)
+            out += lint_text(f, _git_text(project, "show", f":{f}"), cls, lines, pipe, expl, hints, old)
     return out
 
 
@@ -288,9 +314,12 @@ def changed(project: Path, files: list[str], base: str | None = "HEAD") -> list[
             continue
         tracked = git(project, "ls-files", "-z", "--", f":(literal){rel}").strip("\0")
         # a file new since base shows as wholly added; one unchanged since base isn't in the diff at all
-        lines = None if base is None or not tracked else added_lines(project, [base], {rel}).get(rel, set())
+        lines, old = None, set()
+        if base is not None and tracked:
+            lines, before = changes(project, [base], {rel}).get(rel, (set(), rel))
+            old = old_definitions(project, [base], before)
         out += lint_text(rel, p.read_text(encoding="utf-8", errors="replace"), classify(rel, library), lines,
-                         pipe, expl, hints)
+                         pipe, expl, hints, old)
     return out
 
 
@@ -303,8 +332,9 @@ def backlog(project: Path) -> str:
         for line in lint_text(rel, (project / rel).read_text(encoding="utf-8", errors="replace"),
                               classify(rel, library), None, pipe, expl, {}):
             per_file[rel] += 1
-            kinds[line.split(": typed ", 1)[1].split(" ")[0] if ": typed " in line else "parameter use"] += 1
-    head = (f"code gate backlog: {sum(per_file.values())} typed values or parameter problems in "
+            kinds[line.split(": typed ", 1)[1].split(" ")[0] if ": typed " in line else
+                  "function" if " in a pipeline script:" in line else "parameter use"] += 1
+    head = (f"code gate backlog: {sum(per_file.values())} findings in "
             f"{len(per_file)} files ({', '.join(f'{k} {n}' for k, n in kinds.most_common()) or 'none'})")
     return "\n".join([head, *problems, *(f"{n:6d}  {f}" for f, n in per_file.most_common())])
 
@@ -341,6 +371,12 @@ def main(argv: list[str] | None = None) -> int:
         remedy = (f" Move each typed value into {kit_params.PIPELINE} (pipeline) or {kit_params.EXPLORE} (quick "
                   "questions) with a comment saying what it is, or end the line with `# literal: <reason>`."
                   if any(": typed " in f for f in found) else "")
+        if any(" in a pipeline script:" in f for f in found):
+            has_library = bool(library_folders(project, load_config(project)))
+            remedy += (" Move each function into the library (the package, or what library: in "
+                       ".claude/research.yml names) and call it from the script." if has_library else
+                       " The project has no library yet: name one with library: in .claude/research.yml, or add a "
+                       "package, then move each function there.")
         print(f"code gate: {len(found)} finding{'s' if len(found) != 1 else ''}.{remedy}", file=sys.stderr)
         return 1
     if not a.precommit:

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 import lint_code
@@ -79,11 +81,12 @@ def test_a_value_that_is_a_parameter_is_named(project, capsys):
 
 
 def test_parameter_names_are_checked(project, capsys):
-    stage(project, "analysis/run.R", OLD_R + 'n <- param("min_case")\ns <- param("q_start")\n')
+    stage(project, "analysis/run.R", OLD_R + 'n <- param("min_case")\ns <- param("q_start")\nd <- param_path("nope")\n')
     stage(project, "analysis/explore/2026-11-24-q.R", 's <- param("q_start")\nm <- param("min_group_size")\n')
     code, out = gate(project, capsys)
     assert code == 1 and "analysis/run.R:3: param('min_case') is in neither parameter file" in out
     assert "analysis/run.R:4: param('q_start') is an explore parameter" in out
+    assert "analysis/run.R:5: param('nope') is in neither parameter file" in out
     assert "explore/2026-11-24-q.R" not in out
 
 
@@ -126,7 +129,7 @@ def test_package_strings_and_param_are_flagged(project, capsys):
 
 
 def test_python_docstrings_are_not_checked(project, capsys):
-    stage(project, "analysis/run.py", '"""Reads data/raw/x.csv from 2016-01-01."""\n\ndef f():\n'
+    stage(project, "analysis/R/run.py", '"""Reads data/raw/x.csv from 2016-01-01."""\n\ndef f():\n'
                                       '    """Uses 0.05."""\n    return 0\n')
     assert gate(project, capsys) == (0, "")
 
@@ -152,7 +155,7 @@ def test_files_mode_checks_changed_lines_and_new_files(project, capsys):
 def test_all_counts_the_backlog_and_lists_files(project, capsys):
     assert lint_code.main(["--project", str(project), "--all"]) == 0
     out = capsys.readouterr().out
-    assert out.startswith("code gate backlog: 1 typed values or parameter problems in 1 files (number 1)")
+    assert out.startswith("code gate backlog: 1 findings in 1 files (number 1)")
     assert "     1  analysis/run.R" in out
     assert lint_code.main(["--project", str(project), "--all", "analysis/run.R"]) == 0
     assert "analysis/run.R:2: typed number 30" in capsys.readouterr().out
@@ -297,3 +300,66 @@ def test_files_mode_reports_parameter_problems_once(project, capsys):
     assert lint_code.main(["--project", str(project), "--files", "analysis/run.R"]) == 1
     captured = capsys.readouterr()
     assert captured.out.count("late: needs a comment line") == 1 and "typed number 2019" in captured.out
+
+
+def test_a_pipeline_script_defines_no_functions(project, capsys):
+    stage(project, "analysis/run.R", OLD_R + "fmt <- function(x) format(x, nsmall = 2)\n.helper <- \\(x) x\n"
+                                              "y <- sapply(seq_len(n), function(i) i + 1)\n")
+    stage(project, "analysis/fit.py", "class Spec:\n    pass\n\n\ndef estimate(d):\n    return d\n\n\n"
+                                      "def main():\n    estimate(0)\n")
+    assert lint_code.main(["--project", str(project), "--precommit"]) == 1
+    out, err = capsys.readouterr()
+    assert "analysis/run.R:3: defines fmt() in a pipeline script" in out
+    assert "analysis/run.R:4: defines .helper() in a pipeline script" in out and "analysis/run.R:5:" not in out
+    assert "analysis/fit.py:1: defines Spec()" in out and "analysis/fit.py:5: defines estimate()" in out
+    assert "main()" not in out and "Move each function into the library" in err
+
+
+def test_functions_are_fine_in_the_library_explore_tests_packages_and_the_readers(project, capsys):
+    stage(project, "analysis/R/fit.R", "estimate <- function(d) d\n")
+    stage(project, "analysis/explore/2026-11-25-q.R", "helper <- function(d) d\n")
+    stage(project, "analysis/tests/test_fit.R", "check <- function() TRUE\n")
+    stage(project, "pkg/r/R/core.R", "core <- function(x) x\n")
+    reader = (Path(lint_code.__file__).parents[1] / "templates" / "params" / "params.py").read_text()
+    stage(project, "analysis/params.py", reader)
+    assert gate(project, capsys) == (0, "")
+
+
+def test_editing_an_old_function_in_a_pipeline_script_passes(project, capsys):
+    write(project / "analysis" / "old.R", "fmt <- function(x) {\n  format(x)\n}\n")
+    git(project, "add", "analysis/old.R")
+    git(project, "commit", "-q", "-m", "before the rule")
+    stage(project, "analysis/old.R", "fmt <- function(x) {\n  format(x, big.mark = ',')\n}\n")
+    assert gate(project, capsys) == (0, "")
+
+
+def test_an_old_functions_def_line_may_change_and_its_file_may_move(project, capsys):
+    body = "".join(f"    step{i} = x  # step {i}\n" for i in range(8)) + "    return x\n"
+    write(project / "analysis" / "old.py", "def fmt(x):\n" + body)
+    git(project, "add", "analysis/old.py")
+    git(project, "commit", "-q", "-m", "before the rule")
+    stage(project, "analysis/old.py", "def fmt(x, digits=None):\n" + body)
+    assert gate(project, capsys) == (0, "")
+    git(project, "commit", "-q", "--no-verify", "-m", "an argument")
+    git(project, "mv", "analysis/old.py", "analysis/older.py")
+    stage(project, "analysis/older.py", "def fmt(x, digits=None):\n" + body + "\n\ndef pct(x):\n    return x\n")
+    code, out = gate(project, capsys)
+    assert code == 1 and "defines pct()" in out and "fmt" not in out
+    stage(project, "analysis/older.py", "def fmt(x, digits=0):\n" + body)
+    assert lint_code.main(["--project", str(project), "--files", "analysis/older.py"]) == 0
+
+
+def test_named_lambdas_count_and_the_run_all_script_may_keep_a_helper(project, capsys):
+    stage(project, "analysis/run.py", "fmt = lambda x: x\n")
+    stage(project, "analysis/run_all.R", 'run_step <- function(f) source(f)\nrun_step("analysis/sims/run.R")\n')
+    code, out = gate(project, capsys)
+    assert code == 1 and "analysis/run.py:1: defines fmt()" in out and "run_all" not in out
+
+
+def test_without_a_library_the_remedy_says_to_name_one(tmp_path, capsys):
+    p = minimal_project(tmp_path, CONFIG + "library: []\n")
+    write(p / "analysis" / "params.yml", PARAMS)
+    git(p, "init", "-q", "-b", "main")
+    stage(p, "analysis/run.R", "fmt <- function(x) x\n")
+    assert lint_code.main(["--project", str(p), "--precommit"]) == 1
+    assert "The project has no library yet" in capsys.readouterr().err

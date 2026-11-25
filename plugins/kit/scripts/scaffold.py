@@ -568,7 +568,17 @@ def cmd_add_params(project: Path) -> list[str]:
                        f"{'is' if len(foreign) == 1 else 'are'} not the kit's; rename or move "
                        f"{'it' if len(foreign) == 1 else 'them'}, then rerun add-params")
     created = [rel for rel in wanted if not (project / rel).exists()]
+    stale = []                                     # kit readers from an older kit, refreshed unless being edited
+    for rel in (r for r in wanted if r in READERS.values() and (project / r).exists()):
+        if git(project, "status", "--porcelain", "--", rel).strip():
+            print(f"add-params: {rel} has uncommitted changes, so it was left as it is")
+        elif (project / rel).read_bytes() != wanted[rel].read_bytes():
+            stale.append(rel)
     refuse_ignored(project, created)
+    for rel in stale:
+        shutil.copyfile(wanted[rel], project / rel)
+        print(f"add-params: updated the kit's reader {rel} to this kit version")
+    created += stale
     for rel in created:
         (project / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(wanted[rel], project / rel)

@@ -57,7 +57,7 @@ Types are categorical, ordinal or quantitative. An attribute the base layout doe
    "${CLAUDE_PLUGIN_ROOT}/bin/kit" figures.py check --project "${CLAUDE_PROJECT_DIR}" --draft <figure>
    ```
    Fix every error. Fix each warning, or record it under `accepted` with its check, its attribute and the reason, after the user approves.
-5. **Code.** Write the plotting code in the project's language: ggplot2 for R, matplotlib for Python.
+5. **Code.** Write the plotting code in the project's language (ggplot2 for R, matplotlib for Python) as a library function that builds the figure from its data, and call it from the figure's driver script, which passes the results and the output path (`/kit:code`: the library is the paper's released code, and drivers define no functions).
    - The encoding follows the spec.
    - Each reference mark is drawn, and its meaning is labelled in the image or given in the caption, as its `label_in` says.
    - The figure style in effect applies: read the file that `"${CLAUDE_PLUGIN_ROOT}/bin/kit" which figure-style` prints, in full.
@@ -67,7 +67,7 @@ Types are categorical, ordinal or quantitative. An attribute the base layout doe
    - Every number in a label or annotation comes from code (`/kit:numbers`).
 6. **Render and look.** Run the script, convert the PDF to an image in your scratch folder (`pdftoppm -png -r 150 -singlefile <pdf> <scratch>/<figure>`), and look at it. Then run the check again without `--draft`.
 7. **Approve and commit.** Show the user the image and any warnings. After approval:
-   - commit the script and the spec in the code repo;
+   - commit the library function, the driver script and the spec in the code repo;
    - commit the figure in the paper repo, and push to Overleaf unless the user declines.
 
 ## Critique a figure

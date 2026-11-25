@@ -407,3 +407,24 @@ def test_add_params_with_a_shared_hooks_path_still_succeeds(tmp_path, capsys):
     assert main(["add-params", "--project", str(p)]) == 0
     out = capsys.readouterr().out
     assert "add-params: committed" in out and "the code gate is off: " in out and "core.hooksPath" in out
+
+
+def test_add_params_refreshes_the_kits_own_reader(tmp_path, capsys):
+    p = cmd_new("demo", tmp_path, ["r"])
+    reader = p / "analysis" / "params.R"
+    current = reader.read_text()
+    reader.write_text("# The project's parameters, written by research-kit (an older version).\n"
+                      "param <- function(n) n\n")
+    sh(p, "commit", "-q", "--no-verify", "-am", "an older reader")
+    assert "analysis/params.R" in cmd_add_params(p)
+    assert reader.read_text() == current and "updated the kit's reader" in capsys.readouterr().out
+    assert sh(p, "status", "--porcelain", "--", "analysis/params.R") == ""
+
+
+def test_add_params_leaves_a_reader_being_edited(tmp_path, capsys):
+    p = cmd_new("demo", tmp_path, ["r"])
+    reader = p / "analysis" / "params.R"
+    reader.write_text(reader.read_text() + "# a local note\n")             # uncommitted
+    assert cmd_add_params(p) == []
+    assert reader.read_text().endswith("# a local note\n")
+    assert "params.R has uncommitted changes, so it was left as it is" in capsys.readouterr().out

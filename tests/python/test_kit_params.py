@@ -140,3 +140,74 @@ def test_foreign_files_are_named(tmp_path):
     write(tmp_path / "analysis" / "params.yml", "model:\n  lags: 3\n")
     assert kit_params.foreign(tmp_path)[0].startswith("analysis/params.yml is not the kit's parameter file")
     assert kit_params.load(tmp_path) == ({}, {}, [])
+
+
+def _project_in_a_subfolder(tmp_path):
+    """A project whose script runs from paper/, as a cascade that changes folder does."""
+    p = _project_with_sample(tmp_path)
+    write(p / ".claude" / "research.yml", "paper_dir: paper\n")
+    (p / "paper").mkdir()
+    return p
+
+
+def test_the_python_reader_works_from_any_folder_and_needs_its_file(tmp_path):
+    p = _project_in_a_subfolder(tmp_path)
+    code = (f"import sys; sys.path.insert(0, {str(p / 'analysis')!r}); from params import param, param_path; "
+            "print(param('tol')); print(param_path('analysis_data'))")
+    run = subprocess.run([sys.executable, "-c", code], cwd=p / "paper", capture_output=True, text=True)
+    assert run.returncode == 0 and run.stdout.split() == ["1e-09", str(p.resolve() / "data" / "analysis.parquet")]
+    (p / "analysis" / "params.yml").unlink()
+    run = subprocess.run([sys.executable, "-c", code], cwd=p / "paper", capture_output=True, text=True)
+    assert run.returncode != 0 and "analysis/params.yml is missing" in run.stderr and "add-params" in run.stderr
+
+
+@pytest.mark.skipif(shutil.which("Rscript") is None, reason="R is not installed")
+def test_the_r_reader_works_from_any_folder_and_needs_its_file(tmp_path):
+    p = _project_in_a_subfolder(tmp_path)
+    sourced = 'source("../analysis/params.R"); cat(param("tol"), param_path("analysis_data"))'
+    evaluated = (f'eval(parse({str(p / "analysis" / "params.R")!r})); '         # no file name: found by folder
+                 'cat(param("tol"), param_path("analysis_data"))')
+    for code in (sourced, evaluated):
+        run = subprocess.run(["Rscript", "--vanilla", "-e", code], cwd=p / "paper", capture_output=True, text=True)
+        assert run.returncode == 0, run.stderr
+        tol, path = run.stdout.split()
+        assert tol == "1e-09" and Path(path).resolve() == (p / "data" / "analysis.parquet").resolve()
+    (p / "analysis" / "params.yml").unlink()
+    run = subprocess.run(["Rscript", "--vanilla", "-e", sourced], cwd=p / "paper", capture_output=True, text=True)
+    assert run.returncode != 0 and "analysis/params.yml is missing" in run.stderr
+
+
+@pytest.mark.skipif(shutil.which("Rscript") is None, reason="R is not installed")
+def test_the_r_reader_finds_its_files_when_sourced_from_sourced_scripts(tmp_path):
+    p = _project_in_a_subfolder(tmp_path)
+    write(p / "analysis" / "sims" / "run.R",
+          'source("analysis/params.R")\ncat(param("tol"), param_path("analysis_data"), "\\n")\n')
+    write(p / "run_all.R", 'source("analysis/sims/run.R")\n')
+    write(p / "analysis" / "explore" / "2026-11-25-q.R", 'source("analysis/params.R")\ncat(param("tol"), "\\n")\n')
+    for code in ('source("run_all.R")', 'source("analysis/sims/run.R")', 'source("analysis/explore/2026-11-25-q.R")',
+                 'source("analysis/params.R", chdir = TRUE); cat(param("tol"), "\\n")'):
+        run = subprocess.run(["Rscript", "--vanilla", "-e", code], cwd=p, capture_output=True, text=True)
+        assert run.returncode == 0 and run.stdout.split()[0] == "1e-09", (code, run.stderr)
+    run = subprocess.run(["Rscript", "--vanilla", "run_all.R"], cwd=p, capture_output=True, text=True)
+    assert run.returncode == 0 and Path(run.stdout.split()[1]).resolve() == (p / "data" / "analysis.parquet").resolve()
+
+
+def test_param_path_takes_absolute_and_home_paths_and_only_one_path(tmp_path):
+    p = _project_in_a_subfolder(tmp_path)
+    write(p / "analysis" / "explore" / "params.yml",
+          "# research-kit\n\n# Mounted data.\nmounted: '/mnt/data/x.parquet'\n"
+          "# Home data.\nhome: '~/data/x.csv'\n# Two files.\npair: ['a.csv', 'b.csv']\n")
+    code = ("import sys, os; sys.path.insert(0, 'analysis'); from params import param_path\n"
+            "from pathlib import Path\nprint(param_path('mounted'))\n"
+            "print(param_path('home') == Path(os.path.expanduser('~/data/x.csv')))\n"
+            "try:\n    param_path('pair')\nexcept TypeError as e:\n    print('refused')\n")
+    out = subprocess.run([sys.executable, "-c", code], cwd=p, capture_output=True, text=True,
+                         check=True).stdout.split()
+    assert out == ["/mnt/data/x.parquet", "True", "refused"]
+    if shutil.which("Rscript"):
+        code = ('source("analysis/params.R"); cat(param_path("mounted"), '
+                'param_path("home") == path.expand("~/data/x.csv"), '
+                'tryCatch(param_path("pair"), error = function(e) "refused"), "\\n")')
+        out = subprocess.run(["Rscript", "--vanilla", "-e", code], cwd=p, capture_output=True, text=True,
+                             check=True).stdout.split()
+        assert out == ["/mnt/data/x.parquet", "TRUE", "refused"]

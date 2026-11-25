@@ -123,7 +123,7 @@ def test_map_mode_lists_the_library_and_the_parameters(project, capsys):
     assert first.startswith("code map: 5 library functions (3 with no callers), 4 parameters (1 unused)")
     assert first.endswith("library: analysis/R, analysis/paths.py")
     assert "## Library functions" in out and "## Parameters" in out
-    assert "## Repeats" not in out and "## Typed values" not in out and "--all" in out
+    assert "## Repeats" not in out and "## Code check" not in out and "--all" in out
 
 
 def test_descriptions_and_skipped_names(project, capsys):
@@ -148,7 +148,7 @@ def test_parameters_show_value_place_users_and_purpose(project, capsys):
 def test_files_mode_checks_only_the_given_files(project, capsys):
     out = out_of(capsys, project, "--files", "analysis/run_a.R")
     assert "## Library functions" not in out and "## Parameters" not in out
-    assert section(out, "Typed values").strip().splitlines()[-1] == "none"
+    assert section(out, "Code check").strip().splitlines()[-1] == "none"
     repeats = section(out, "Repeats")
     assert "fmt defined in analysis/run_a.R, analysis/run_b.R" in repeats and "main" not in repeats
     assert "7 lines: analysis/run_a.R:5-11, analysis/run_b.R:3-9" in repeats
@@ -160,7 +160,7 @@ def test_files_mode_checks_only_the_given_files(project, capsys):
 
 def test_files_mode_reports_typed_values_in_changed_lines(project, capsys):
     write(project / "analysis" / "run_a.R", RUN_A + "late <- subset(d, year > 2019)\n")
-    typed = section(out_of(capsys, project, "--files", "analysis/run_a.R"), "Typed values")
+    typed = section(out_of(capsys, project, "--files", "analysis/run_a.R"), "Code check")
     assert "analysis/run_a.R:13: typed number 2019" in typed
 
 
@@ -168,7 +168,7 @@ def test_all_mode_adds_functions_outside_and_the_backlog(project, capsys):
     out = out_of(capsys, project, "--all")
     assert "analysis/run_a.R: fmt" in section(out, "Functions outside the library")
     assert "analysis/explore/2026-11-24-cases.py: helper" in out
-    assert "code gate backlog: " in section(out, "Typed values")
+    assert "code gate backlog: " in section(out, "Code check")
 
 
 def test_summary_counts(project, capsys):
@@ -289,7 +289,7 @@ def test_not_a_git_repo_exits_2(tmp_path, capsys):
 
 def test_review_section(project, tmp_path):
     text = code_map.review_section(project, ["analysis/run_a.R"])
-    assert text.startswith("code map: ") and "\n### Typed values" in text and "Library functions" not in text
+    assert text.startswith("code map: ") and "\n### Code check" in text and "Library functions" not in text
     assert code_map.review_section(tmp_path / "elsewhere", ["a.R"]) == "not a kit project"
     p = minimal_project(tmp_path / "bad", CONFIG + "library: [analysis/nope]\n")
     assert code_map.review_section(p, ["a.R"]).startswith("code map unavailable: ")

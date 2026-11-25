@@ -23,14 +23,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kit_params  # noqa: E402
 import lint_code  # noqa: E402
-from code_scan import (CODE_SUFFIXES, classify, code_files, library_folders, literals, parse_python,  # noqa: E402
-                       py_functions, r_functions, split_comment)
-
-READER_FILES = {"analysis/params.R", "analysis/params.py"}   # the kit's param() readers, not project code
+from code_scan import (CODE_SUFFIXES, ENTRY_POINTS, classify, code_files, kits_reader, library_folders,  # noqa: E402
+                       literals, parse_python, py_functions, r_functions, split_comment)
 from kitlib import CONFIG_REL, KitError, find_project, load_config, paper_folders  # noqa: E402
 
 REPEAT_LINES = 6
-ENTRY_POINTS = {"main", "parse_args"}
 CALL = re.compile(r"([A-Za-z_.][\w.]*)\s*\(")
 TRIVIAL = re.compile(r"[\s{}()\[\],;]*")
 DATA_EXT = re.compile(r"\.(csv|tsv|txt|parquet|feather|rds|rda|rdata|dta|xls|xlsx|json|pkl|pickle|sqlite|db|gz|"
@@ -157,7 +154,7 @@ def build(project: Path) -> dict:
         sigs[f] = significant(lines)
         if cls == "archive":
             continue
-        if f in READER_FILES and "research-kit" in "".join(lines[:5]):
+        if kits_reader(f, text):
             fs = []                           # the kit's param() reader; a project's own file of that name is code
         if cls == "library":
             funcs += fs
@@ -263,7 +260,7 @@ def report(m: dict, mode: str = "map", only: set[str] | None = None, typed: list
         out += [f"{f}: {', '.join(names)}" for f, names in sorted(m["outside"].items())]
     keep = (lambda fs: True) if only is None else (lambda fs: bool(only & set(fs)))  # noqa: E731
     if typed is not None:
-        out += ["", "## Typed values (lint_code.py: numbers, dates and paths belong in the parameter files)"]
+        out += ["", "## Code check (lint_code.py: typed numbers, dates and paths; functions in pipeline scripts)"]
         out += typed or ["none"]
     out += ["", "## Repeats"]
     out += [f"{name} defined in {', '.join(fs)}" for name, fs in m["name_repeats"] if keep(fs)]
