@@ -124,3 +124,29 @@ These are rare edge cases that have been accepted rather than fixed. The bar for
 - Caller counts, parameter users and paper-output writers are found by text, not by running code. A name built at run time is missed.
 - Repeats are blocks of six or more lines after spacing and comments are dropped. A copy with a renamed variable doesn't count as a repeat.
 - A direct read of library data is reported only for data that a library loader reads, through `param()` or as an argument.
+
+## Near copies (`near_copy.py`)
+
+The gate blocks a new library function that is 95% or more alike another library function (both at least 10 tokens), or 90% or more (both at least 30 tokens, about three lines), once local names and typed values are set aside. The map lists pairs from 80% (30 tokens or more) for review. The levels were measured on two projects' code: every sampled pair at the blocking levels was a copy to merge, and about three in four of the larger pairs from 80% to 90% were.
+
+### Not caught (accepted; the skill and `/kit:review` cover them)
+
+- **The same idea written differently,** such as a negative-zero rule written two ways, or terciles cut with two different functions.
+- **Copies inside larger functions:** a copied block within a longer function lowers the whole function's similarity. The map's six-line repeats catch identical blocks.
+- **Small functions below the levels,** such as `avg3(a, b, c)` beside `avg4(a, b, c, d)` (about 90% alike at 15 tokens). The number rule flags their typed 3 and 4, and review sees the rest.
+- **Old functions:** pairs that are both already in the library, and an existing library function being edited, aren't blocked; `lint_code.py --all` counts them, as one finding for each function with an earlier near copy (three alike are two findings). A library function moved to another library file, or renamed with no other edit, stays old. A whole script moved into the library with few edits keeps its functions as old.
+- **Functions too long or too deep to compare:** over 2,000 tokens (about 200 lines), or Python nested too deeply for the syntax-tree walk (hundreds of `elif` branches). The comparison's cost grows faster than the length.
+- **Python columns** count only as direct string subscripts (`d["income"]`); `d.loc[:, "income"]` and lists of columns are strings.
+- **Functions defined in unusual ways** (the same cases as the function rule above).
+
+### Blocked although legitimate (end the definition line with `# distinct: <reason>`)
+
+- **Deliberate variants with the same shape,** such as the head and tail of a list, or a mean and a median computed the same way, can reach the levels when they are small.
+- **Thin wrappers that fix one argument,** such as two one-line formatters that call `fmt()` with a different suffix, are 100% alike. Calling `fmt()` with the argument is the kit's preference; mark the wrapper when its name carries meaning.
+- **R S3 methods and Python overrides** with the same body shape.
+- **A function renamed and edited in one commit** counts as new, so if its old version nearly copied another function, it is blocked now.
+
+### Behaviour notes
+
+- Of two new near copies in one commit, only the later one (by file and line) is checked, so `# distinct:` goes on that one.
+- Drivers' `main` and `parse_args` are left out of every comparison.

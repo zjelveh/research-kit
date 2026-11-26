@@ -296,7 +296,7 @@ def test_review_section(project, tmp_path):
 
 
 def test_review_section_survives_any_error(project, monkeypatch):
-    def broken(_):
+    def broken(*_):
         raise OSError("unreadable file")
     monkeypatch.setattr(code_map, "build", broken)
     assert code_map.review_section(project, ["a.R"]) == "code map unavailable: unreadable file"
@@ -368,3 +368,29 @@ def test_passing_a_result_to_a_library_writer_is_not_library_data(project, capsy
     write(project / "analysis" / "numbers" / "make_numbers.R", 'x <- read.csv(param("sims_summary"))\n')
     reads = section(out_of(capsys, project, "--all"), "Direct reads")
     assert "make_numbers.R" not in reads and "analysis/run_a.R:4  reads analysis_data" in reads
+
+
+POOL = """{name} <- function(d, min_cases) {{
+  keep <- table(d$charge)
+  d[d$charge %in% names(keep[keep >= min_cases]), ]
+}}
+"""
+
+
+def test_near_copies_are_listed_for_changed_files_and_grouped_in_all(project, capsys):
+    write(project / "analysis" / "R" / "pool.R", POOL.format(name="pool"))
+    write(project / "analysis" / "tables.R", POOL.format(name="pool_for_table") + "x <- pool_for_table(d, 3)\n")
+    write(project / "analysis" / "figure.R", POOL.format(name="fig_pool"))
+    write(project / "analysis" / "explore" / "2026-11-25-q.R", POOL.format(name="q_pool"))
+    out = out_of(capsys, project, "--files", "analysis/explore/2026-11-25-q.R")
+    near = section(out, "Near copies").strip().splitlines()[1:]
+    assert near == ["q_pool() analysis/explore/2026-11-25-q.R:1 is 100% alike pool() analysis/R/pool.R:1",
+                    "q_pool() analysis/explore/2026-11-25-q.R:1 is 100% alike fig_pool() analysis/figure.R:1",
+                    "q_pool() analysis/explore/2026-11-25-q.R:1 is 100% alike pool_for_table() analysis/tables.R:1"]
+    assert "of near copies" not in out.splitlines()[0]          # grouping compares every pair: --all only
+    out = out_of(capsys, project, "--all")
+    assert "2 groups of near copies" in out.splitlines()[0]     # with the fixture's two fmt()
+    assert section(out, "Near copies").strip().splitlines()[1:] == [
+        "pool() analysis/R/pool.R:1, fig_pool() analysis/figure.R:1, pool_for_table() analysis/tables.R:1",
+        "fmt() analysis/run_a.R:2, fmt() analysis/run_b.R:2"]
+    assert "Near copies" not in out_of(capsys, project)                  # the plain map stays short

@@ -3,7 +3,9 @@ which files there are, what class each belongs to, the functions they define, an
 from __future__ import annotations
 
 import ast
+import os
 import re
+import subprocess
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,8 +115,19 @@ def library_folders(project: Path, cfg: dict) -> list[str]:
     return out
 
 
-def _z(text: str) -> list[str]:
-    return [p for p in text.split("\0") if p]
+def git_names(project: Path, *args: str) -> list[str]:
+    """File names from a `git ... -z` listing, decoded as the file system decodes them, so that a name that
+    isn't UTF-8 can still be opened and passed back to git."""
+    proc = subprocess.run(["git", "-C", str(project), *args], capture_output=True)
+    if proc.returncode != 0:
+        raise KitError(f"git {' '.join(args)} failed in {project}: {proc.stderr.decode('utf-8', 'replace').strip()}")
+    return [os.fsdecode(n) for n in proc.stdout.split(b"\0") if n]
+
+
+def lines_of(text: str) -> list[str]:
+    """The lines as git counts them, split at \\n only: str.splitlines also splits at form feeds and other
+    separators, which would shift every later line number."""
+    return text.split("\n")
 
 
 def in_scope(rel: str, cfg: dict) -> bool:
@@ -125,11 +138,11 @@ def in_scope(rel: str, cfg: dict) -> bool:
 
 def code_files(project: Path, cfg: dict, library: list[str]) -> tuple[list[str], list[str]]:
     """The code files git tracks or would track, and the library's code files that git ignores."""
-    listed = _z(git(project, "ls-files", "--cached", "--others", "--exclude-standard", "-z"))
+    listed = git_names(project, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
     files = sorted({f for f in listed if in_scope(f, cfg) and (project / f).is_file()})
     ignored = sorted({f for lib in library
-                      for f in _z(git(project, "ls-files", "--others", "--ignored", "--exclude-standard", "-z",
-                                      "--", lib)) if f.endswith(CODE_SUFFIXES)})
+                      for f in git_names(project, "ls-files", "--others", "--ignored", "--exclude-standard", "-z",
+                                         "--", f":(literal){lib}") if f.endswith(CODE_SUFFIXES)})
     return files, ignored
 
 
@@ -178,7 +191,7 @@ def parse_python(text: str) -> ast.Module | None:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", SyntaxWarning)
             return ast.parse(text.removeprefix("\ufeff"))
-    except (SyntaxError, ValueError):
+    except (SyntaxError, ValueError, RecursionError):    # nested past the parser's own limit counts as unparsable
         return None
 
 
@@ -212,7 +225,7 @@ def top_level_definitions(rel: str, text: str) -> list[tuple[int, str]]:
                 for t in (n.targets if isinstance(n, ast.Assign) else [n.target]) if isinstance(t, ast.Name)]
         return sorted(out)
     out, depth = [], 0
-    for n, line in enumerate(text.splitlines(), 1):
+    for n, line in enumerate(lines_of(text), 1):
         code = split_comment(line)[0]
         if depth == 0 and (m := R_DEF.match(line)):
             out.append((n, m.group(1)))

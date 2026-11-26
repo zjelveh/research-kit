@@ -34,8 +34,8 @@ Plan task: {{PLAN}}
 
 ## What the code map finds in the changed files
 
-Typed values, repeated code, paper outputs with several writers and direct reads of the library's data,
-found by text:
+Typed values, repeated code, near copies of functions, paper outputs with several writers and direct
+reads of the library's data, found by text:
 
 {{CODE_MAP}}
 
@@ -46,6 +46,8 @@ found by text:
 - Code that does something other than what the plan, the decisions log or the memos say.
 - Code that re-derives what the project's library defines (a sample, a period, a setting), types a
   number, date or path instead of reading a parameter, or adds a second writer of a paper output.
+- A library function that nearly copies another (the map's near copies), or a `# distinct:` reason that
+  doesn't hold: one function with an argument should do for both.
 - Results files and numbers that do not follow from the code. Reproduce key numbers with your own code
   where you can.
 - Paths that matter but no test exercises.

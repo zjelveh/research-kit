@@ -4,8 +4,9 @@
   code_map.py --project P                the map: the summary, the library's functions and the parameters
   code_map.py --project P --files F ... [--base REV]
                                          the checks on these files: typed values on the lines changed
-                                         since REV (default HEAD; none: whole files), repeats, paper
-                                         outputs with several writers, and direct reads of the library's data
+                                         since REV (default HEAD; none: whole files), repeats, near copies,
+                                         paper outputs with several writers, and direct reads of the library's
+                                         data
   code_map.py --project P --all          every list for the whole project
 
 Caller counts, parameter users and writers are found by text, not by running the code. Nothing is saved.
@@ -23,11 +24,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kit_params  # noqa: E402
 import lint_code  # noqa: E402
+import near_copy  # noqa: E402
 from code_scan import (CODE_SUFFIXES, ENTRY_POINTS, classify, code_files, kits_reader, library_folders,  # noqa: E402
-                       literals, parse_python, py_functions, r_functions, split_comment)
+                       lines_of, literals, parse_python, py_functions, r_functions, split_comment)
 from kitlib import CONFIG_REL, KitError, find_project, load_config, paper_folders  # noqa: E402
 
 REPEAT_LINES = 6
+LEVELS = near_copy.BLOCK + near_copy.LIST          # what the map lists; the gate blocks at near_copy.BLOCK
 CALL = re.compile(r"([A-Za-z_.][\w.]*)\s*\(")
 TRIVIAL = re.compile(r"[\s{}()\[\],;]*")
 DATA_EXT = re.compile(r"\.(csv|tsv|txt|parquet|feather|rds|rda|rdata|dta|xls|xlsx|json|pkl|pickle|sqlite|db|gz|"
@@ -128,7 +131,9 @@ def output_writers(project: Path, cfg: dict, lits: dict[str, list[tuple[int, str
     return out
 
 
-def build(project: Path) -> dict:
+def build(project: Path, near: str | None = None) -> dict:
+    """Everything the reports need. Near copies only when asked: "files" reads every function for the changed
+    files' comparisons, and "all" also groups them, which compares every pair."""
     cfg = load_config(project)
     library = library_folders(project, cfg)
     files, ignored = code_files(project, cfg, library)
@@ -138,12 +143,13 @@ def build(project: Path) -> dict:
     funcs, outside, unparsed = [], {}, []
     calls, lits, sigs, defs = defaultdict(set), {}, {}, defaultdict(set)
     users, reads, passed, loader_files = defaultdict(set), [], [], set()
+    bodies = []                                   # (class, function) for the near-copy lists
     for f in files:
         cls = classes[f]
         if cls == "test":
             continue
         text = (project / f).read_text(encoding="utf-8", errors="replace")
-        lines = text.splitlines()
+        lines = lines_of(text)
         if f.endswith(".py"):
             tree = parse_python(text)
             if tree is None:
@@ -156,6 +162,8 @@ def build(project: Path) -> dict:
             continue
         if kits_reader(f, text):
             fs = []                           # the kit's param() reader; a project's own file of that name is code
+        elif near:
+            bodies += [(cls, b) for b in near_copy.bodies(f, text)]
         if cls == "library":
             funcs += fs
         else:
@@ -191,11 +199,15 @@ def build(project: Path) -> dict:
                           key=lambda x: (not ({"library", "pipeline"} & {classes[f] for f in x[1]}), x[0]))
     blocks, archive_repeats = block_repeats(sigs, classes)
     params = {**{n: (*v, "pipeline") for n, v in pipe.items()}, **{n: (*v, "explore") for n, v in expl.items()}}
+    core = [b for cls, b in bodies if cls in ("library", "pipeline")]
+    groups = _clusters([(a, b) for _, a, b in near_copy.pairs(core, LEVELS)]) if near == "all" else None
     return {"library": library, "ignored": ignored, "classes": classes, "funcs": funcs, "callers": callers,
             "params": params,
             "param_problems": param_problems, "foreign": kit_params.foreign(project), "users": users,
             "outside": outside,
             "name_repeats": name_repeats, "blocks": blocks, "archive_repeats": archive_repeats,
+            "bodies": bodies, "core": core, "near": None if groups is None else sorted(groups, key=lambda g: (
+                not any(classes[b.file] == "library" for b in g), -len(g), min((b.file, b.line) for b in g))),
             "writers": output_writers(project, cfg, lits, params, users), "reads": reads, "unparsed": unparsed}
 
 
@@ -216,6 +228,7 @@ def summary(m: dict) -> list[str]:
              f"{_n(sum(len(v) for v in m['outside'].values()), 'function')} outside the library",
              f"{_n(pipe_rep, 'repeat')} in pipeline code ({all_rep - pipe_rep} in explore, "
              f"{m['archive_repeats']} with archive copies)",
+             *([] if m["near"] is None else [f"{_n(len(m['near']), 'group')} of near copies"]),
              "paper not attached" if writers is None else f"{_n(len(writers), 'output')} with several writers",
              f"{_n(len(m['reads']), 'direct read')} of library data"]
     lines = [f"code map: {', '.join(parts)}; library: {', '.join(m['library']) or 'none'}"]
@@ -227,6 +240,10 @@ def summary(m: dict) -> list[str]:
         lines.append(f"note: {_n(len(m['unparsed']), 'Python file')} could not be parsed: "
                      f"{', '.join(m['unparsed'][:5])}{' ...' if len(m['unparsed']) > 5 else ''}")
     return lines
+
+
+def _where(b) -> str:
+    return f"{b.name}() {b.file}:{b.line}" + (f" [distinct: {b.distinct}]" if b.distinct else "")
 
 
 def _shown(value) -> str:
@@ -266,6 +283,15 @@ def report(m: dict, mode: str = "map", only: set[str] | None = None, typed: list
     out += [f"{name} defined in {', '.join(fs)}" for name, fs in m["name_repeats"] if keep(fs)]
     out += [f"{b['size']} lines: {', '.join(f'{f}:{a}-{z}' for f, a, z in b['spans'])}"
             for b in m["blocks"] if keep([f for f, _, _ in b["spans"]])]
+    out += ["", "## Near copies (functions alike once local names and values are set aside: one function with an "
+                "argument would do)"]
+    if mode == "all":
+        out += [", ".join(_where(b) for b in sorted(g, key=lambda b: (b.file, b.line))) for g in m["near"]]
+    else:
+        for cls, b in m["bodies"]:
+            if b.file in only and cls not in ("test", "archive"):
+                out += [f"{_where(b)} is {int(100 * r)}% alike {_where(o)}"
+                        for r, o in near_copy.matches(b, m["core"], LEVELS)[:3]]
     out += ["", "## Paper outputs with several writers (names found in strings and parameters)"]
     if m["writers"] is None:
         out.append("paper not attached")
@@ -289,7 +315,7 @@ def relative_files(project: Path, files: list[str]) -> set[str]:
 def files_report(project: Path, files: list[str], base: str | None = "HEAD") -> str:
     """The checks on these files; typed values on the lines changed since base (None: the whole files)."""
     only = relative_files(project, files)
-    return report(build(project), "files", only, lint_code.changed(project, sorted(only), base))
+    return report(build(project, "files"), "files", only, lint_code.changed(project, sorted(only), base))
 
 
 def review_section(project: Path, files: list[str], base: str = "HEAD") -> str:
@@ -309,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--project", type=Path, required=True)
     mode = ap.add_mutually_exclusive_group()
+    for stream in (sys.stdout, sys.stderr):      # a file name that isn't UTF-8 is shown escaped, not a crash
+        getattr(stream, "reconfigure", lambda **_: None)(errors="backslashreplace")
     mode.add_argument("--files", nargs="+", help="check these files (relative to the project): typed values, "
                                                  "repeats, writers and direct reads")
     mode.add_argument("--all", action="store_true", help="every list, for the whole project")
@@ -320,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.files:
             print(files_report(project, a.files, None if a.base == "none" else a.base))
         elif a.all:
-            print(report(build(project), "all", typed=[lint_code.backlog(project).splitlines()[0]]))
+            print(report(build(project, "all"), "all", typed=[lint_code.backlog(project).splitlines()[0]]))
         else:
             print(report(build(project), "map"))
         return 0

@@ -442,3 +442,25 @@ def test_add_params_refreshes_a_kit_reader_for_an_undeclared_language(tmp_path, 
     assert "updated the kit's reader analysis/params.R" in capsys.readouterr().out
     own = p / "analysis" / "params.py"
     assert cmd_add_params(p) == [] and own.exists()
+
+
+def test_a_tracked_file_inside_an_ignored_folder_is_refused_up_front(tmp_path):
+    p = cmd_new("demo", tmp_path, ["r"])
+    with (p / ".gitignore").open("a") as f:
+        f.write(".claude/\n")
+    sh(p, "commit", "-qam", "ignore the folder; research.yml stays tracked")
+    with pytest.raises(KitError, match=r"\.claude/research\.yml would be ignored by git \(.*\.gitignore:\d+:\.claude/\).*"
+                                       r"even when git tracks it"):
+        cmd_add_language("python", p)
+    assert not (p / "pyproject.toml").exists()
+
+
+def test_a_negated_ignore_rule_lets_the_path_through(tmp_path):
+    p = cmd_new("demo", tmp_path, ["r"])
+    with (p / ".gitignore").open("a") as f:
+        f.write(".claude/*\n!.claude/research.yml\n!.claude/settings.json\n*.python-version\n!.python-version\n")
+    sh(p, "commit", "-qam", "folder contents ignored, with exceptions")
+    from scaffold import refuse_ignored
+    refuse_ignored(p, [".claude/research.yml", ".python-version", "pyproject.toml"])
+    with pytest.raises(KitError, match=r"\.claude/other\.yml would be ignored"):
+        refuse_ignored(p, [".claude/other.yml"])

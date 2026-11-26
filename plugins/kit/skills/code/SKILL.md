@@ -13,7 +13,7 @@ A request calls the library. When a library function nearly fits, extend it; whe
 
 **(hard rule)** A pipeline script defines no function (an entry point named `main` or `parse_args` aside): the paper's logic lives in the library, and the script calls it.
 
-The kit's pre-commit check blocks a commit whose added lines break either rule. Tests and archived code are exempt from both. The second rule doesn't apply to the library, a package, explore scripts or the run-all script, and a function a script already had may still be edited. A file moved with heavy edits, so that git no longer sees it as moved, counts as new, functions included. A package keeps the first rule in its own form (section 4). "Function" includes a Python class or a named lambda; never rewrite a blocked function as a lambda, `local()` or `assign()` to get past the check: move it into the library.
+The kit's pre-commit check blocks a commit whose added lines break either rule, and a new library function that nearly copies one already there (section 4). Tests and archived code are exempt from these checks. The second rule doesn't apply to the library, a package, explore scripts or the run-all script, and a function a script already had may still be edited. A file moved with heavy edits, so that git no longer sees it as moved, counts as new, functions included. A package keeps the first rule in its own form (section 4). "Function" includes a Python class or a named lambda; never rewrite a blocked function as a lambda, `local()` or `assign()` to get past the check: move it into the library.
 
 ## 1. Map first
 
@@ -80,6 +80,13 @@ Then:
 - **One definition per concept.** Named variants (a long and a short window) sit beside the main one, as parameters or arguments. A function takes the population it is computed on as an argument, and never assumes one.
 - **A one-off calculation** stays in its explore script. When it comes to feed the paper, or a second script needs it, it moves into the library with a test, and the scripts call it.
 - **A function that nearly does the job** is extended, for example with an argument, rather than copied into a sibling.
+- **Promoting code into the library** (a one-off that now feeds the paper, or a function moved out of a script):
+  - find the closest library function first: the map's list, and `--files` on the new code, which lists near copies;
+  - when one does the same job, make what differs an argument (a column, a cutoff, an optional step), and have every caller use it;
+  - name the function after its concept (`group_mean(x)`), not its case (`mean_of_three`);
+  - when the copies give different results today, stop and ask which definition is right: that's a question about the definition, not a refactor.
+
+  The check compares a new library function with every other one once local names and typed values are set aside, and blocks a near copy. A real difference ends the definition line with `# distinct: <reason>`, which review sees.
 - **Changing what a library function does:** find its callers (the map's `callers` count, then a search for `name(`), run their tests, and tell the user which outputs are now stale.
 - **Two builders that must coexist,** such as a legacy panel kept for one output, get a test that they agree: keys, row counts and key columns.
 - **Scripts never assign to library variables;** they pass arguments.
@@ -99,9 +106,9 @@ Run the map on the files you changed or added:
 ```
 "${CLAUDE_PLUGIN_ROOT}/bin/kit" code_map.py --project "${CLAUDE_PROJECT_DIR}" --files <changed files>
 ```
-It lists the typed values on the changed lines, repeats, paper outputs with several writers, and direct reads of the library's data. Fix each one the change introduced, or say why it stays. The map keeps no baseline, so judge what is new from the change's diff. The pre-commit check will block the typed values and the functions in pipeline scripts that the map listed.
+It lists the typed values on the changed lines, repeats, near copies, paper outputs with several writers, and direct reads of the library's data. Fix each one the change introduced, or say why it stays. The map keeps no baseline, so judge what is new from the change's diff. The pre-commit check will block the typed values and the functions in pipeline scripts that the map listed, and a new library function that nearly copies another library function. It compares library code only and blocks from 90% alike; the map also lists scripts' functions, from 80%, for you to judge.
 
-**When a commit is blocked** with `code gate: N findings`, each line names a file and a line. For a typed value, with a hint when it is already a parameter: move it into the right parameter file, or end the line with `# literal: <reason>` when it can't be a parameter. For a function defined in a pipeline script: move it into the library and call it from the script; if the project has no library yet, stop and ask where it lives. A string that is only an extension (`".csv"`, `"*.csv"`) is not flagged, so a name built in code is fine. Never commit with `--no-verify`.
+**When a commit is blocked** with `code gate: N findings`, each line names a file and a line. For a typed value, with a hint when it is already a parameter: move it into the right parameter file, or end the line with `# literal: <reason>` when it can't be a parameter. For a function defined in a pipeline script: move it into the library and call it from the script; if the project has no library yet, stop and ask where it lives. For a near copy (`f() is a near copy of g()`): merge it into `g()` with an argument for what differs and call that; when the two give different results, stop and ask which definition is right. A string that is only an extension (`".csv"`, `"*.csv"`) is not flagged, so a name built in code is fine. Never commit with `--no-verify`.
 
 ## Pre-send checks
 - [ ] The map was read before writing, and every library function and parameter that fits is used?
@@ -110,6 +117,7 @@ It lists the typed values on the changed lines, repeats, paper outputs with seve
 - [ ] New values are in the right parameter file, each with its comment; a changed pipeline value was approved?
 - [ ] A quick question is a dated explore script with its three header lines, and no script is a copy of another?
 - [ ] Every step that feeds the paper is a library function; definitions and reported quantities have tests; each sample is one function; a new driver is in the run-all script?
+- [ ] No new library function nearly copies another; what differs between them is an argument?
 - [ ] No method written by hand where a package does it, and no substantive option left to a default?
 - [ ] The map's `--files` check shows nothing the change introduced, or each item is explained?
 

@@ -407,16 +407,21 @@ def require_flow_config(project: Path) -> None:
                            'e.g. languages: [r] and packages: {r: "mypkg"}')
 
 
-def refuse_ignored(project: Path, created: list[str]) -> None:
+def refuse_ignored(project: Path, paths: list[str]) -> None:
+    """Refuse, before anything changes, a path that `git add` would refuse: one an ignore rule covers, or one
+    inside an ignored folder, which git won't stage even when it tracks the file. A `!` exception counts."""
     probes = [f"{rel}/.kit-probe" if rel == "renv" or rel.startswith("pkg/") else rel
-              for rel in created if rel not in UNSTAGED]
+              for rel in paths if rel not in UNSTAGED]
     for rel in probes:
-        proc = subprocess.run(["git", "-C", str(project), "check-ignore", "-v", "--no-index", "--", rel],
-                              capture_output=True, text=True)
-        if proc.returncode == 0:
-            rule = proc.stdout.split("\t")[0]
-            raise KitError(f"{rel.removesuffix('/.kit-probe')} would be ignored by git ({rule}); "
-                           "fix the ignore rule first")
+        dry = subprocess.run(["git", "-C", str(project), "add", "--dry-run", "--ignore-missing", "--", rel],
+                             capture_output=True, text=True)
+        if dry.returncode != 0:
+            proc = subprocess.run(["git", "-C", str(project), "check-ignore", "-v", "--no-index", "--", rel],
+                                  capture_output=True, text=True)
+            rule = proc.stdout.split("\t")[0] if proc.returncode == 0 else dry.stderr.strip().splitlines()[0]
+            raise KitError(f"{rel.removesuffix('/.kit-probe')} would be ignored by git ({rule}); fix the ignore "
+                           "rule first. A file inside an ignored folder can't be staged even when git tracks it: "
+                           "ignore the folder's contents instead (`folder/*`) and add a `!` line for the file")
 
 
 def require_slides_gate_passing(project: Path, cfg: dict) -> None:
@@ -477,10 +482,10 @@ def _add(project: Path, lang: str, override: str | None, package: bool) -> None:
         require_renv(project)
     if lang == "r" and not need_lang:
         r_check_synced(project)  # refuse drift before creating anything (review I3)
-    refuse_ignored(project, created)
+    own = list(dict.fromkeys([rel for rel in OWN_TRACKED if in_head(project, rel)] + created))
+    refuse_ignored(project, own)
     require_slides_gate_passing(project, cfg)
     values = base_values(project.name)
-    own = list(dict.fromkeys([rel for rel in OWN_TRACKED if in_head(project, rel)] + created))
     orig = git(project, "rev-parse", "HEAD").strip()
     try:
         if need_lang:
@@ -578,7 +583,7 @@ def cmd_add_params(project: Path) -> list[str]:
             print(f"add-params: {rel} has uncommitted changes, so it was left as it is")
         elif (project / rel).read_bytes() != wanted[rel].read_bytes():
             stale.append(rel)
-    refuse_ignored(project, created)
+    refuse_ignored(project, created + stale)
     for rel in stale:
         shutil.copyfile(wanted[rel], project / rel)
         print(f"add-params: updated the kit's reader {rel} to this kit version")

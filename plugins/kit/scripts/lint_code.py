@@ -14,6 +14,8 @@ negatives), dates, and paths or file names. They belong in analysis/params.yml (
 read with param("name"). In a package (pkg/), a number may also be a function default or part of a
 top-level named constant, and param() is not used. A line that ends in `# literal: <reason>` is allowed.
 A pipeline script defines no function (main and parse_args aside): the paper's code lives in the library.
+A new library function may not be a near copy of another library function (near_copy.py): one function with
+an argument does for both, unless its definition line ends in `# distinct: <reason>`.
 Also checks the parameter files' format, and that every param("name") exists and that pipeline code uses no
 explore parameter. A moved file counts only its changed lines; in a merge, only lines new to both parents.
 Exit: 0 nothing found (always, with --all), 1 findings, 2 config or project error.
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import os
 import re
 import subprocess
 import sys
@@ -30,9 +33,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kit_params  # noqa: E402
-from code_scan import (CODE_SUFFIXES, DATE, ENTRY_POINTS, FILE_EXT, R_ASSIGN, R_DEF, R_STRING, classify,  # noqa: E402
-                       code_files, depth_change, in_scope, kits_reader, library_folders, literals, parse_python,
-                       split_comment, top_level_definitions)
+import near_copy  # noqa: E402
+from code_scan import (CODE_SUFFIXES, DATE, ENTRY_POINTS, FILE_EXT, R_ASSIGN, R_DEF, R_STRING,  # noqa: E402
+                       classify, code_files, depth_change, git_names, in_scope, kits_reader, library_folders,
+                       lines_of, literals, parse_python, split_comment, top_level_definitions)
 from kitlib import KitError, find_project, git, load_config  # noqa: E402
 
 ALLOWED_NUMBERS = {0, 1, 2, 100}
@@ -45,6 +49,8 @@ DIFF = ("diff", "--no-ext-diff", "--no-color", "--no-textconv", "--text", "--int
 CODE_PATHS = ("*.R", "*.r", "*.py")
 PARAM_CALL = re.compile(r"(?<![\w.])param(?:_path)?\(\s*[\"']([^\"']*)[\"']\s*\)")
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", re.M)
+NEAR = " is a near copy of "
+FINDING = re.compile(r"(.*?):\d+: ")
 
 
 def kind_of_string(s: str) -> str | None:
@@ -127,7 +133,7 @@ def _r_top_assignments(codes: list[str]) -> set[int]:
 
 
 def r_literals(text: str, package: bool) -> list[tuple[int, str, object]]:
-    lines = text.splitlines()
+    lines = lines_of(text)
     codes = [split_comment(line)[0] for line in lines]
     out = []
     for n, code in enumerate(codes, 1):
@@ -161,7 +167,7 @@ def param_calls(rel: str, text: str) -> list[tuple[int, str]]:
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("param", "param_path")
             and n.args
             and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str)]
-    return [(n, name) for n, line in enumerate(text.splitlines(), 1)
+    return [(n, name) for n, line in enumerate(lines_of(text), 1)
             for name in PARAM_CALL.findall(split_comment(line)[0])]
 
 
@@ -172,7 +178,7 @@ def lint_text(rel: str, text: str, cls: str, lines: set[int] | None, pipe: dict,
     if cls in ("test", "archive"):
         return []
     package = rel.startswith("pkg/")
-    raw = text.splitlines()
+    raw = lines_of(text)
     found = python_literals(text, package) if rel.endswith(".py") else r_literals(text, package)
     if found is None:
         return [f"{rel}:1: Python that does not parse; fix it before committing"]
@@ -199,6 +205,70 @@ def lint_text(rel: str, text: str, cls: str, lines: set[int] | None, pipe: dict,
                 "script calls it" for n, name in top_level_definitions(rel, text)
                 if (lines is None or n in lines) and name not in ENTRY_POINTS and name not in old_defs]
     return out
+
+
+def near_copies(texts: dict[str, str], new: dict[str, set[int] | None], old: dict[str, set[str]],
+                before: dict[str, str] | None = None) -> list[str]:
+    """Findings for the new library functions in `new` (lines None: every function in the file), each against
+    its closest match among the library functions in `texts`. A function is new when its definition line is
+    added and its file didn't define its name before (`old`), and it didn't just leave its place in the library
+    as it was in `before` (moved to another file, or renamed with no other edit). Of two new near copies, only
+    the later one is checked, so `# distinct:` goes on that one."""
+    funcs = [b for rel, text in sorted(texts.items()) for b in near_copy.bodies(rel, text)]
+    here = {(b.file, b.name) for b in funcs}
+    gone = [b for rel, text in sorted((before or {}).items()) for b in near_copy.bodies(rel, text)
+            if (b.file, b.name) not in here]
+    gone_names, gone_tokens = {b.name for b in gone}, {tuple(b.tokens) for b in gone}
+    fresh = [b for b in funcs if b.file in new and (new[b.file] is None or b.line in new[b.file])
+             and b.name not in old.get(b.file, set()) and b.name not in gone_names
+             and tuple(b.tokens) not in gone_tokens]
+    order = {id(b): (b.file, b.line) for b in fresh}
+    out = []
+    for b in fresh:
+        others = [o for o in funcs if id(o) not in order or order[id(o)] < order[id(b)]]
+        if not b.distinct and (hit := near_copy.matches(b, others)):
+            r, o = hit[0]
+            out.append(f"{b.file}:{b.line}: {b.name}(){NEAR}{o.name}() ({o.file}:{o.line}), {int(100 * r)}% alike")
+    return out
+
+
+def _blobs(project: Path, names: list[str]) -> dict[str, str]:
+    """The text of each git object name (`:path` in the index, `REV:path`), read through one `git cat-file
+    --batch`; a name git doesn't have is left out."""
+    batch = [n for n in names if "\n" not in n]
+    proc = subprocess.run(["git", "-C", str(project), "cat-file", "--batch"], capture_output=True,
+                          input=b"".join(os.fsencode(n) + b"\n" for n in batch))
+    out, data, pos = {}, proc.stdout, 0
+    for n in batch:
+        end = data.find(b"\n", pos)
+        if end < 0:
+            break
+        head, pos = data[pos:end].split(b" "), end + 1
+        if len(head) == 3 and head[2].isdigit():           # "<id> <type> <size>", then the content
+            size = int(head[2])
+            if head[1] == b"blob":
+                out[n] = data[pos:pos + size].decode("utf-8", "replace")
+            pos += size + 1
+    for n in names:
+        if "\n" in n:                                       # cat-file's batch can't name these
+            out[n] = _git_text(project, "show", n)
+    return out
+
+
+def library_texts(project: Path, cfg: dict, library: list[str], rev: str | None) -> dict[str, str]:
+    """The library's code files as they are in the working tree (rev None), the index (rev ""), or a commit."""
+    if not library:
+        return {}
+    if rev is None:
+        files, ignored = code_files(project, cfg, library)    # ignored library code is library code too
+        texts = {rel: (project / rel).read_text(encoding="utf-8", errors="replace") for rel in files + ignored}
+    else:
+        names = git_names(project, "ls-files", "-z") if rev == "" else \
+            git_names(project, "ls-tree", "-r", "-z", "--name-only", rev)
+        names = [n for n in names if in_scope(n, cfg) and classify(n, library) == "library"]
+        found = _blobs(project, [f"{rev}:{n}" for n in names])      # ":path" is the index
+        texts = {n: found[f"{rev}:{n}"] for n in names if f"{rev}:{n}" in found}
+    return {rel: t for rel, t in texts.items() if in_scope(rel, cfg) and classify(rel, library) == "library"}
 
 
 def _hints(pipe: dict, expl: dict) -> dict:
@@ -255,7 +325,8 @@ def old_definitions(project: Path, revs: list[str], path: str) -> set[str]:
     for rev in revs:
         proc = subprocess.run(["git", "-C", str(project), "show", f"{rev}:{path}"], capture_output=True)
         if proc.returncode == 0:
-            names |= {n for _, n in top_level_definitions(path, proc.stdout.decode("utf-8", "replace"))}
+            text = proc.stdout.decode("utf-8", "replace")
+            names |= {n for _, n in top_level_definitions(path, text)} | {b.name for b in near_copy.bodies(path, text)}
     return names
 
 
@@ -283,10 +354,18 @@ def precommit(project: Path) -> list[str]:
         print(f"note: {note}", file=sys.stderr)
     hints = _hints(pipe, expl)
     out = list(problems)
-    for f, (lines, old) in sorted(staged_lines(project).items()):
+    staged = staged_lines(project)
+    for f, (lines, old) in sorted(staged.items()):
         cls = classify(f, library)
         if lines and in_scope(f, cfg) and cls not in ("test", "archive"):
             out += lint_text(f, _git_text(project, "show", f":{f}"), cls, lines, pipe, expl, hints, old)
+    new = {f: lines for f, (lines, _) in staged.items()
+           if lines and in_scope(f, cfg) and classify(f, library) == "library"}
+    if new:
+        head = _git_text(project, "rev-parse", "-q", "--verify", "HEAD^{commit}", check=False).strip()
+        out += near_copies(library_texts(project, cfg, library, ""), new,
+                           {f: old for f, (_, old) in staged.items()},
+                           library_texts(project, cfg, library, "HEAD") if head else None)
     return out
 
 
@@ -298,7 +377,7 @@ def changed(project: Path, files: list[str], base: str | None = "HEAD") -> list[
     library = library_folders(project, cfg)
     pipe, expl, _ = kit_params.load(project)
     hints = _hints(pipe, expl)
-    out = []
+    out, new, olds = [], {}, {}
     root = project.resolve()
     if base is not None and not git(project, "rev-parse", "--verify", "-q", f"{base}^{{tree}}",
                                     check=False).strip():   # a tree is enough: the review may start at the empty one
@@ -320,6 +399,11 @@ def changed(project: Path, files: list[str], base: str | None = "HEAD") -> list[
             old = old_definitions(project, [base], before)
         out += lint_text(rel, p.read_text(encoding="utf-8", errors="replace"), classify(rel, library), lines,
                          pipe, expl, hints, old)
+        if classify(rel, library) == "library" and lines != set():
+            new[rel], olds[rel] = lines, old
+    if new:
+        out += near_copies(library_texts(project, cfg, library, None), new, olds,
+                           library_texts(project, cfg, library, base) if base is not None else None)
     return out
 
 
@@ -328,12 +412,16 @@ def backlog(project: Path) -> str:
     library = library_folders(project, cfg)
     pipe, expl, problems = kit_params.load(project)
     per_file, kinds = Counter(), Counter()
-    for rel in code_files(project, cfg, library)[0]:
-        for line in lint_text(rel, (project / rel).read_text(encoding="utf-8", errors="replace"),
-                              classify(rel, library), None, pipe, expl, {}):
-            per_file[rel] += 1
-            kinds[line.split(": typed ", 1)[1].split(" ")[0] if ": typed " in line else
-                  "function" if " in a pipeline script:" in line else "parameter use"] += 1
+    found = [line for rel in code_files(project, cfg, library)[0]
+             for line in lint_text(rel, (project / rel).read_text(encoding="utf-8", errors="replace"),
+                                   classify(rel, library), None, pipe, expl, {})]
+    texts = library_texts(project, cfg, library, None)
+    found += near_copies(texts, {rel: None for rel in texts}, {})
+    for line in found:
+        per_file[FINDING.match(line).group(1)] += 1
+        kinds[line.split(": typed ", 1)[1].split(" ")[0] if ": typed " in line else
+              "function" if " in a pipeline script:" in line else
+              "near copy" if NEAR in line else "parameter use"] += 1
     head = (f"code gate backlog: {sum(per_file.values())} findings in "
             f"{len(per_file)} files ({', '.join(f'{k} {n}' for k, n in kinds.most_common()) or 'none'})")
     return "\n".join([head, *problems, *(f"{n:6d}  {f}" for f, n in per_file.most_common())])
@@ -343,9 +431,11 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--project", type=Path, required=True)
     mode = ap.add_mutually_exclusive_group(required=True)
+    for stream in (sys.stdout, sys.stderr):      # a file name that isn't UTF-8 is shown escaped, not a crash
+        getattr(stream, "reconfigure", lambda **_: None)(errors="backslashreplace")
     mode.add_argument("--precommit", action="store_true", help="lint the lines the staged commit adds")
     mode.add_argument("--files", nargs="+", help="lint the lines changed since --base in these files")
-    mode.add_argument("--all", nargs="*", metavar="F", help="count every typed value by file, or list them in F")
+    mode.add_argument("--all", nargs="*", metavar="F", help="count every finding by file, or list them in F")
     ap.add_argument("--base", default="HEAD", help="with --files: the commit to compare with (none: whole files)")
     a = ap.parse_args(argv)
     try:
@@ -377,6 +467,10 @@ def main(argv: list[str] | None = None) -> int:
                        ".claude/research.yml names) and call it from the script." if has_library else
                        " The project has no library yet: name one with library: in .claude/research.yml, or add a "
                        "package, then move each function there.")
+        if any(NEAR in f for f in found):
+            remedy += (" Merge each near copy into the function it copies, with an argument for what differs, and "
+                       "call that; if the two give different results, ask which definition is right first. A real "
+                       "difference ends the definition line with `# distinct: <reason>`.")
         print(f"code gate: {len(found)} finding{'s' if len(found) != 1 else ''}.{remedy}", file=sys.stderr)
         return 1
     if not a.precommit:

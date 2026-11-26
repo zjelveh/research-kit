@@ -363,3 +363,154 @@ def test_without_a_library_the_remedy_says_to_name_one(tmp_path, capsys):
     stage(p, "analysis/run.R", "fmt <- function(x) x\n")
     assert lint_code.main(["--project", str(p), "--precommit"]) == 1
     assert "The project has no library yet" in capsys.readouterr().err
+
+
+POOL_R = """pool <- function(d, min_cases) {
+  keep <- table(d$charge)
+  d[d$charge %in% names(keep[keep >= min_cases]), ]
+}
+"""
+POOL_COPY_R = """pool_strict <- function(x, k) {
+  n <- table(x$charge)
+  x[x$charge %in% names(n[n >= k]), ]
+}
+"""
+
+
+def test_a_new_library_function_that_copies_another_is_blocked(project, capsys):
+    stage(project, "analysis/R/lib.R", "load <- function() 1\n" + POOL_R)
+    git(project, "commit", "-q", "-m", "pool")
+    stage(project, "analysis/R/pools.R", POOL_COPY_R + "rate <- function(d) mean(d$released, na.rm = TRUE)\n")
+    assert lint_code.main(["--project", str(project), "--precommit"]) == 1
+    out, err = capsys.readouterr()
+    assert out.strip() == ("analysis/R/pools.R:1: pool_strict() is a near copy of pool() (analysis/R/lib.R:2), "
+                           "100% alike")
+    assert "with an argument for what differs" in err and "ask which definition is right" in err
+    assert "# distinct: <reason>" in err
+
+
+def test_distinct_lets_a_real_difference_through(project, capsys):
+    stage(project, "analysis/R/lib.R", "load <- function() 1\n" + POOL_R)
+    git(project, "commit", "-q", "-m", "pool")
+    stage(project, "analysis/R/pools.R", POOL_COPY_R.replace("{\n", "{  # distinct: counts charges per court\n", 1))
+    assert gate(project, capsys) == (0, "")
+
+
+def test_old_library_functions_may_be_edited_and_two_new_copies_report_once(project, capsys):
+    stage(project, "analysis/R/lib.R", "load <- function() 1\n" + POOL_R + POOL_COPY_R)
+    code, out = gate(project, capsys)
+    assert code == 1 and out.strip() == ("analysis/R/lib.R:6: pool_strict() is a near copy of pool() "
+                                         "(analysis/R/lib.R:2), 100% alike")
+    git(project, "commit", "-q", "--no-verify", "-m", "both, before the rule")
+    stage(project, "analysis/R/lib.R", "load <- function() 1\n" + POOL_R + POOL_COPY_R.replace("x, k", "x, k, by"))
+    assert gate(project, capsys) == (0, "")
+
+
+def test_moving_a_copy_from_a_script_into_the_library_is_checked(project, capsys):
+    stage(project, "analysis/R/lib.R", "load <- function() 1\n" + POOL_R)
+    write(project / "analysis" / "tables.py", "")
+    git(project, "commit", "-q", "-m", "pool")
+    stage(project, "analysis/R/table_pool.R", POOL_COPY_R)
+    stage(project, "analysis/run.R", OLD_R + POOL_COPY_R)
+    code, out = gate(project, capsys)
+    assert "analysis/R/table_pool.R:1: pool_strict() is a near copy of pool()" in out
+    assert "analysis/run.R:3: defines pool_strict() in a pipeline script" in out
+    assert "analysis/run.R:3: pool_strict() is a near copy" not in out   # the gate compares library code only
+
+
+def test_python_library_copies_and_the_files_and_all_modes(project, capsys):
+    fn = ("def {name}(d, k):\n    keep = d.groupby('charge').size()\n    d = d[d.charge.isin(keep[keep >= k].index)]\n"
+          "    d['female'] = d.sex == 'F'\n    return d\n")
+    stage(project, "analysis/R/pools.py", fn.format(name="load_pool"))
+    git(project, "commit", "-q", "-m", "pool")
+    write(project / "analysis" / "R" / "figure_pool.py", fn.format(name="load") + "\n\n" +
+          fn.format(name="load_again").replace("== 'F'", ".str[0].str.upper() == 'F'"))
+    assert lint_code.main(["--project", str(project), "--files", "analysis/R/figure_pool.py"]) == 1
+    out = capsys.readouterr().out
+    assert "analysis/R/figure_pool.py:1: load() is a near copy of load_pool() (analysis/R/pools.py:1), 100% alike" in out
+    assert "analysis/R/figure_pool.py:8: load_again() is a near copy of load() (analysis/R/figure_pool.py:1), 90% alike" in out
+    assert lint_code.main(["--project", str(project), "--all"]) == 0
+    out = capsys.readouterr().out
+    assert "(near copy 2, number 1)" in out.splitlines()[0] and "     1  analysis/R/pools.py" in out
+
+
+def test_moving_or_renaming_a_library_function_is_not_new(project, capsys):
+    stage(project, "analysis/R/lib.R", "load <- function() 1\n" + POOL_R + POOL_COPY_R)
+    git(project, "commit", "-q", "--no-verify", "-m", "an old near-copy pair")
+    stage(project, "analysis/R/lib.R", "load <- function() 1\n" + POOL_R)
+    stage(project, "analysis/R/strict.R", POOL_COPY_R)                      # moved to its own file
+    assert gate(project, capsys) == (0, "")
+    git(project, "commit", "-q", "-m", "split")
+    stage(project, "analysis/R/strict.R", POOL_COPY_R.replace("pool_strict", "pool_with_cutoff"))   # renamed
+    assert gate(project, capsys) == (0, "")
+
+
+def test_python_methods_old_and_new(project, capsys):
+    fn = ("    def {name}(self, d, k):\n        keep = d.groupby('charge').size()\n"
+          "        d = d[d.charge.isin(keep[keep >= k].index)]\n        return d\n")
+    stage(project, "analysis/R/pools.py", "class Pools:\n" + fn.format(name="load"))
+    git(project, "commit", "-q", "-m", "a class")
+    stage(project, "analysis/R/pools.py", "class Pools:\n" + fn.format(name="load").replace("charge", "court"))
+    assert gate(project, capsys) == (0, "")                                # editing an old method
+    stage(project, "analysis/R/pools.py", "class Pools:\n" + fn.format(name="load") + "\n" + fn.format(name="again"))
+    code, out = gate(project, capsys)
+    assert code == 1 and "analysis/R/pools.py:7: Pools.again() is a near copy of Pools.load()" in out
+    stage(project, "analysis/R/pools.py", "class Pools:\n" + fn.format(name="load") + "\n" +
+          fn.format(name="again").replace("k):", "k):  # distinct: counts by court in the appendix"))
+    assert gate(project, capsys) == (0, "")
+
+
+def test_the_later_of_two_new_copies_carries_the_mark(project, capsys):
+    stage(project, "analysis/R/lib.R", "load <- function() 1\n" + POOL_R +
+          POOL_COPY_R.replace("{\n", "{  # distinct: the appendix's stricter pool\n", 1))
+    assert gate(project, capsys) == (0, "")
+
+
+def test_files_mode_on_new_unchanged_ignored_and_oddly_named_library_files(project, capsys):
+    stage(project, "analysis/R/lib.R", "load <- function() 1\n" + POOL_R)
+    git(project, "commit", "-q", "-m", "pool")
+    write(project / "analysis" / "R" / "untracked.R", POOL_COPY_R)
+    assert lint_code.main(["--project", str(project), "--files", "analysis/R/untracked.R"]) == 1
+    assert "untracked.R:1: pool_strict() is a near copy of pool()" in capsys.readouterr().out
+    assert lint_code.main(["--project", str(project), "--files", "analysis/R/lib.R"]) == 0    # unchanged
+    capsys.readouterr()
+    write(project / ".gitignore", "analysis/R/ignored.R\n")
+    write(project / "analysis" / "R" / "ignored.R", POOL_COPY_R.replace("pool_strict", "pool_ignored"))
+    assert lint_code.main(["--project", str(project), "--files", "analysis/R/ignored.R"]) == 1
+    assert "ignored.R:1: pool_ignored() is a near copy" in capsys.readouterr().out
+    import os
+    odd = os.fsdecode(b"analysis/R/r\xe9g.R")
+    write(project / odd, "rate <- function(d) mean(d$released, na.rm = TRUE)\n")
+    git(project, "add", "-A")
+    git(project, "commit", "-q", "--no-verify", "-m", "a name that isn't UTF-8")
+    stage(project, "analysis/R/more.R", "share <- function(d) sum(d$held) / nrow(d)\n")
+    assert gate(project, capsys)[0] in (0, 1)                                  # no crash
+    assert lint_code.main(["--project", str(project), "--files", "analysis/R/more.R"]) in (0, 1)
+
+
+def test_the_backlog_counts_each_function_with_an_earlier_copy(project, capsys):
+    stage(project, "analysis/R/lib.R", "load <- function() 1\n" + POOL_R + POOL_COPY_R +
+          POOL_COPY_R.replace("pool_strict", "pool_third"))
+    git(project, "commit", "-q", "--no-verify", "-m", "three alike")
+    assert lint_code.main(["--project", str(project), "--all"]) == 0
+    assert "near copy 2," in capsys.readouterr().out.splitlines()[0]              # 3 alike: 2 findings
+
+
+def test_a_finding_that_names_a_file_that_is_not_utf8_is_shown(project, capsys):
+    import os
+    odd = os.fsdecode(b"analysis/R/r\xe9g.R")
+    write(project / odd, POOL_R)
+    git(project, "add", "-A")
+    git(project, "commit", "-q", "--no-verify", "-m", "a name that isn't UTF-8")
+    stage(project, "analysis/R/new.R", POOL_COPY_R)
+    code, out = gate(project, capsys)
+    assert code == 1 and "pool_strict() is a near copy of pool()" in out
+
+
+def test_a_form_feed_does_not_hide_a_new_pipeline_function(project, capsys):
+    write(project / "analysis" / "run2.R", "x <- 1\n\x0c\n")
+    git(project, "add", "analysis/run2.R")
+    git(project, "commit", "-q", "-m", "a form feed")
+    stage(project, "analysis/run2.R", "x <- 1\n\x0c\nhelper <- function(d) d\n")
+    code, out = gate(project, capsys)
+    assert code == 1 and "analysis/run2.R:3: defines helper() in a pipeline script" in out
