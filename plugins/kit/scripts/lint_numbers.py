@@ -25,6 +25,7 @@ from kitlib import KitError, git, git_timeout, glob_to_regex, load_config, time_
 #   O  an optional argument [..] may appear here: its content is prose (\twocolumn[...])
 #   p  an optional (..) spec may appear here: skipped (\cmidrule(lr){2-4})
 #   d  an optional TeX box spec may appear here: skipped (\hbox to 3cm{...})
+#   g  TeX glue may appear here, without braces: skipped (\vskip -2pt plus 1pt, \hskip\tabcolsep)
 #   s  a required argument, skipped: brace-matched and never interpreted
 #   t  a required argument that is prose, even inside math (where $ opens math again)
 #   m  a required argument that is math
@@ -58,8 +59,9 @@ COMMAND_SIGNATURES: dict[str, str] = {
     "crefrange": "ss", "Crefrange": "ss", "hyperlink": "st", "hypertarget": "st",
     "hyperref": "oa",
     # lengths, counters, breaks
-    "vspace": "s", "hspace": "s", "setlength": "ss", "addtolength": "ss", "setcounter": "ss",
-    "addtocounter": "ss",
+    "vspace": "s", "hspace": "s", "vskip": "g", "hskip": "g", "kern": "g", "raise": "g", "lower": "g",
+    "setlength": "ss", "addtolength": "ss",
+    "setcounter": "ss", "addtocounter": "ss",
     **dict.fromkeys(["linebreak", "pagebreak", "nolinebreak", "nopagebreak"], "o"),
     "twocolumn": "O",
     # boxes and colour (box contents are text mode, even inside math)
@@ -68,7 +70,8 @@ COMMAND_SIGNATURES: dict[str, str] = {
     "textcolor": "osa", "color": "os", "phantom": "s", "hphantom": "s", "vphantom": "s",
     # table and slide layout
     "multicolumn": "ss", "multirow": "ososo", "cline": "s", "cmidrule": "ops", "rule": "oss",
-    "column": "os",
+    "addlinespace": "o", "toprule": "o", "midrule": "o", "bottomrule": "o", "specialrule": "sss",
+    "sisetup": "s", "adjustbox": "st", "column": "os",
     # definitions
     **dict.fromkeys(["newcommand", "renewcommand", "providecommand", "DeclareRobustCommand",
                      "newcolumntype"], "sos"),
@@ -172,6 +175,11 @@ _OVERLAY_ITEM = (rf"\s*(?:[A-Za-z]+:)?(?:[A-Za-z]+@)?"
                  rf"(?:{_OVERLAY_POINT}(?:-{_OVERLAY_POINT}?)?|-{_OVERLAY_POINT})\s*")
 _OVERLAY = re.compile(rf"{_OVERLAY_ITEM}(?:[,|]{_OVERLAY_ITEM})*")
 _BOX_SPEC = re.compile(r"(?:to|spread)(?![A-Za-z])[^{}\n]*")
+# TeX glue: a dimension (a number and a unit, a number and a length register, or a register), then optional
+# plus and minus parts: -2pt, 0.5\baselineskip plus 1fil, \tabcolsep.
+_DIMEN = (r"[-+]?[ \t]*(?:(?:\d+(?:\.\d*)?|\.\d+)[ \t]*(?:true[ \t]*)?"
+          r"(?:pt|pc|in|bp|cm|mm|dd|cc|sp|em|ex|px|mu|fil{1,3}|\\[A-Za-z]+)|\\[A-Za-z]+)")
+_GLUE = re.compile(rf"{_DIMEN}(?:[ \t]*plus[ \t]*{_DIMEN})?(?:[ \t]*minus[ \t]*{_DIMEN})?")
 _NAME_SUFFIX = re.compile(r"(?:st|nd|rd|th|s)(?![^\W\d_])")
 _FILE_NAME = re.compile(r"[^ \t\r\n{}%]+")             # \input main.tex
 _BRACE = re.compile(r"[{}]")
@@ -211,6 +219,8 @@ class _Closer:
 class _Scanner:
     """One pass over a file. `scan` dispatches on the next special character and recurses
     into groups, math, and prose arguments inside math (\\text{... $x$ ...})."""
+
+    SIGNATURES = COMMAND_SIGNATURES   # a subclass may read some commands differently (lint_tables)
 
     def __init__(self, text: str, fname: str):
         self.text, self.fname, self.n = text, fname, len(text)
@@ -454,7 +464,7 @@ class _Scanner:
             if self.text.startswith("}", k):  # passed as a token: {\left}
                 return j
             return self.required_arg(i, k, name)
-        signature = CITE_SIGNATURE if folded in CITE_CMDS else COMMAND_SIGNATURES.get(name, "")
+        signature = CITE_SIGNATURE if folded in CITE_CMDS else self.SIGNATURES.get(name, "")
         return self.arg_chain(i, j, mode, name, signature)
 
     # -- argument chains -------------------------------------------------------------
@@ -490,6 +500,10 @@ class _Scanner:
                     j = end
             elif slot == "d":
                 m = _BOX_SPEC.match(t, self.skip_ws(j))
+                if m is not None:
+                    j = m.end()
+            elif slot == "g":
+                m = _GLUE.match(t, self.skip_ws(j))
                 if m is not None:
                     j = m.end()
             elif slot == "s":
@@ -948,6 +962,43 @@ def run_gate(project: Path, cfg: dict, gate: str, source: str) -> tuple[int, int
     return len(findings), read_baseline(repo, base_rel, source), findings
 
 
+BLOCKED = ("Commit blocked: replace the new numbers with macros, "
+           "or end the line with %num-ok if the number is not a result.")
+
+
+def paper_precommit(project: Path, cfg: dict) -> int:
+    """The paper repo's hook: this lint and the table check (lint_tables.py) on the index. Both run and print, the
+    exit code is the higher of the two, and a baseline is written or staged only when both pass."""
+    import lint_tables
+    repo, _, base_rel = gate_paths(project, cfg, "paper")
+    lower = None
+    try:
+        count, baseline, findings = run_gate(project, cfg, "paper", "index")
+        print(f"paper [index]: count={count} baseline={baseline} {'ok' if count <= baseline else 'REGRESSION'}")
+        if count > baseline:
+            for f in findings:
+                print(f"  {f.file}:{f.line}: {f.token}")
+            print(BLOCKED)
+            code = 1
+        else:
+            code, lower = 0, (count if count < baseline else None)
+    except KitError as e:
+        print(f"lint_numbers: ERROR: {e}", file=sys.stderr)
+        code = 2
+    tables = lint_tables.gate(project, cfg)
+    print("\n".join(tables.lines), file=sys.stderr if tables.code == 2 else sys.stdout)
+    if max(code, tables.code) != 0:
+        return max(code, tables.code)
+    if lower is not None:
+        (repo / base_rel).write_text(f"{lower}\n", encoding="utf-8")
+        git(repo, "add", base_rel)
+        print(f"paper: baseline lowered {baseline} -> {lower} (staged)")
+    if tables.write is not None:
+        lint_tables.write_baseline(project, cfg, tables.write, stage=True)
+        print(tables.note)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--project", type=Path, default=Path.cwd())
@@ -972,6 +1023,8 @@ def main(argv: list[str] | None = None) -> int:
             (repo / base_rel).write_text(f"{count}\n", encoding="utf-8")
             print(f"{a.gate}: baseline set to {count}")
             return 0
+        if a.precommit and a.gate == "paper":
+            return paper_precommit(a.project, cfg)
         source = "index" if (a.index or a.precommit) else (a.git_ref or "worktree")
         count, baseline, findings = run_gate(a.project, cfg, a.gate, source)
         status = "ok" if count <= baseline else "REGRESSION"
@@ -981,8 +1034,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {f.file}:{f.line}: {f.token}")
         if count > baseline:
             if a.precommit:
-                print("Commit blocked: replace the new numbers with macros, "
-                      "or end the line with %num-ok if the number is not a result.")
+                print(BLOCKED)
             return 1
         if a.precommit and count < baseline:
             (repo / base_rel).write_text(f"{count}\n", encoding="utf-8")

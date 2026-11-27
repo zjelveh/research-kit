@@ -35,7 +35,7 @@ flowchart TB
         notes["notes: argument, outlines, memos, literature, figure specs"]
         state["state: current state, decisions"]
         codegate{{"code gate: no typed numbers, dates or paths; no functions in pipeline scripts"}}
-        gate{{"numbers gate: no hand-typed numbers"}}
+        gate{{"numbers gate: no hand-typed numbers; tables print real minus signs and star legends"}}
         params --> code --> make --> numbers
         numbers --> paper
         numbers --> talks
@@ -59,7 +59,7 @@ flowchart TB
 - **Session start.** Every session in a kit project begins with the rules, the project's current state (`state/CURRENT_STATE.md`) and a status block: uncommitted changes, new commits on Overleaf, hand-typed numbers in the paper and the slides, and the code review status. Outside kit projects the kit does nothing.
 - **Analysis code.** The project's library is the paper's code as it will be released: every step that produces a result in the paper is a function there, and pipeline scripts are thin drivers that call it. Before writing code, `/kit:code` has Claude read a map of the library's functions and the parameters. A quick question gets a short, dated script in `analysis/explore/` that calls the library, instead of a fresh copy of the loading and sample logic. A git hook blocks a commit that adds a function to a pipeline script.
 - **Parameters.** Every number, date and path the code uses lives in `analysis/params.yml`, with a comment saying what it is and why, and code reads it with `param("name")`. A git hook blocks a commit that types such a value on a new or edited line.
-- **Generated numbers.** Each language's `make_numbers` script writes `numbers.tex`, one LaTeX macro per result, and the claims ledger records which script produced each one. The paper and the talks use the macros. A git hook blocks a commit that adds a hand-typed number to the paper or the slides.
+- **Generated numbers.** Each language's `make_numbers` script writes `numbers.tex`, one LaTeX macro per result, and the claims ledger records which script produced each one. The paper and the talks use the macros. A git hook blocks a commit that adds a hand-typed number to the paper or the slides, and, in the paper, a table that prints a negative number with a hyphen, uses stars its legend doesn't define, or gives a star a different threshold from the paper's other tables.
 - **Figures.** `/kit:figures` records each figure's data, the reader's task and the chosen idiom in a short spec, checks the design against a catalogue of 52 visualization idioms, and only then writes the plotting code.
 - **Prose.** `/kit:writing` works from the paper's argument down: a short argument file, a section outline you approve, the whole section drafted and read in context, and line edits last.
 - **Checkpoints.** `/kit:checkpoint` updates `CURRENT_STATE.md` before a session ends, so the next session starts where this one stopped.
@@ -120,7 +120,7 @@ my-paper/
 | `/kit:learn` | Saves a lesson to your rules, voice, writing patterns, slide or figure style, or a venue file, or to the project's `CLAUDE.md` | A correction that should hold from now on |
 | `/kit:notes` | Research questions, dated memos and notation | Recording an idea, conjecture, memo or symbol |
 | `/kit:lit` | Literature map, verified `.bib` entries and saved searches | Searching, adding or citing literature |
-| `/kit:numbers` | Generated number macros and the numbers check | Adding a number, table or figure, or a commit blocked by the numbers check |
+| `/kit:numbers` | Generated number macros, and the number and table checks | Adding a number, table or figure, or a commit blocked by the numbers check |
 | `/kit:figures` | Designs a figure from its data and the reader's task with Munzner's idioms, or critiques an existing one | Making or reviewing a figure |
 | `/kit:code` | Reads the project's code map first, keeps definitions in the project's library and every number, date and path in its parameter files, and answers quick questions with dated explore scripts; a pre-commit check blocks typed values and functions in pipeline scripts | Writing or changing analysis code, or a commit blocked by the code gate |
 | `/kit:writing` | Works from the paper's argument to a section outline, a whole-section draft and line edits, with the voice, writing patterns and venue rules | Drafting or editing manuscript prose |

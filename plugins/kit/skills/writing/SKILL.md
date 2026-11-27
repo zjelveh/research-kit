@@ -75,7 +75,7 @@ Read it in full. It holds the argument in four to eight sentences, each section'
 1. Show the exact block: file, line range and the current text.
 2. Show the full before and after within its paragraph, with a short analysis of the problem and the options where there is a real choice. Wait for approval. Show several line edits together only when the user asks for a batch.
 3. Apply the approved text exactly, and run the knock-on sweep (section 6) after each. If a line edit adds, drops or reorders paragraphs of an outlined section, update the outline to match and show that change too.
-4. Build (5.6), then commit in the paper repo and push to Overleaf with approval. If the numbers check blocks the commit, see `/kit:numbers`.
+4. Build (5.6), then commit in the paper repo and push to Overleaf with approval. If the numbers or table check blocks the commit, see `/kit:numbers`.
 
 ### 5.5 Paper sweep
 At two milestones: once the core sections are drafted, before the introduction, discussion and abstract are written; and before submission. List, by section, where each claim ID, results macro, key term and citation appears. Each repeat is kept as a planned recap (listed in the redundancy map), cut, or turned into a back-reference. Update the map when a claim's home moves. Report the list; each change goes through 5.4.
@@ -139,4 +139,4 @@ Run before showing anything, at its level.
 - A hard rule seems to make a sentence worse.
 - A result has no macro, or a symbol has no `notation.md` entry.
 - A citation hasn't been verified against a retrieved source (use `/kit:lit`).
-- `check_stale.py` exits 2, `latexmk` fails, or the numbers check blocks a commit.
+- `check_stale.py` exits 2, `latexmk` fails, or the numbers or table check blocks a commit.

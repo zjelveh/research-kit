@@ -6,8 +6,8 @@ These are rare edge cases that have been accepted rather than fixed. The bar for
 
 ### False positives (fix by ending the line with `%num-ok`)
 
-- **TeX dimensions in prose** count as numbers: `\vskip 2pt`, `\kern2pt`, `\fontsize{10}{12}`, `\captionsetup{skip=5pt}`.
-- **Colour, width and layout arguments of commands outside the policy tables** count as numbers: `\cellcolor{gray!6}`, `\addlinespace[2pt]`, `\midrule[0.5pt]`, `\specialrule`, tabularray `tblr` keys, `\newgeometry{margin=1in}`, `\animategraphics`.
+- **TeX dimensions in prose** count as numbers: `\fontsize{10}{12}`, `\captionsetup{skip=5pt}`.
+- **Colour, width and layout arguments of commands outside the policy tables** count as numbers: `\cellcolor{gray!6}`, tabularray `tblr` keys, `\newgeometry{margin=1in}`, `\animategraphics`.
 - **`\addplot` outside an `axis` environment** counts as numbers.
 - **`2SLS`** counts as a number. The refined name rule exempts only digits preceded by a letter and the ordinal or plural suffixes st, nd, rd, th and s.
 - **`thebibliography` / `\bibitem` text** is linted. Policy item P12 (skip it) was not adopted.
@@ -148,5 +148,35 @@ The gate blocks a new library function that is 95% or more alike another library
 
 ### Behaviour notes
 
+- **A library file moved with heavy edits** into a file git doesn't pair with it: its functions keep their names, so they stay old for this check, but its lines count as new for the typed-value rule (fixed with parameters or `# literal:`).
+
 - Of two new near copies in one commit, only the later one (by file and line) is checked, so `# distinct:` goes on that one.
 - Drivers' `main` and `parse_args` are left out of every comparison.
+- A function leaving a file that the same commit drops from research.yml's `library` key counts as moved, because the library before the commit is read with the key as it was then.
+
+## Table checks (`lint_tables.py`)
+
+### Not caught (accepted; review covers them)
+
+- **Legend wordings the check doesn't recognise.** It reads `<symbol> p < <threshold>` (with `$^{*}$`, `\sym{*}`, `\textsuperscript{*}`, `\dagger`, `p-value`, parentheses and percents), "`***` Significant at the 1 percent level", "Significance levels: `*` 10%", fixest's `***: 0.01`, and lists such as "`***`, `**`, `*` denote significance at the 1, 5 and 10 percent levels". Any other wording reads as no legend, so its stars are reported; end the table with `%legend-ok: <reason>`.
+- **Only `tabular`, `tabular*`, `tabularx` and `longtable` are read.** `tblr` (tabularray), `tabulary`, `NiceTabular`, `xltabular` and `tabu` are not, and neither are tables built by `\pgfplotstabletypeset` or other commands.
+- **Tables reached through a macro** (`\newcommand{\tabinput}[1]{\input{tables/#1}}`) get the cell checks as files the manuscript never inputs, without the legend checks, if they are directly in `tables/`; files elsewhere reached this way, and files in subfolders of `tables/`, aren't checked.
+- **An `S` column hidden more than one `\newcolumntype` deep** counts as a text column, so its numbers can be reported as hyphens.
+- **Numbers outside cells** (captions, notes) are left to review.
+
+### Blocked although legitimate (end the line with `%table-ok: <reason>`)
+
+- **A cell whose text is a hyphen and digits on purpose,** such as a missing-value code `\texttt{-99}` in a codebook, or an event time `-1` printed in text (`$-1$` is the usual fix).
+- **A macro in a generated file whose value is a negative number** counts even if the paper never uses it, or uses it only in math, where it prints correctly. Fix the writer (`\ensuremath{-}`), or end the line with `%table-ok`.
+
+### Behaviour notes
+
+- **`numbers.tex` writes negatives as `\ensuremath{-}1.2`** (0.5.0), and a value that rounds to zero without its sign (`-0.00` becomes `0.00`), so an interval bound's macro needs enough decimals in its format. A negative number macro inside `\num{}`, `\SI{}`, arithmetic (`\pgfmathparse`, `\fpeval`) or an `S`/`D` cell would break; none was found in five projects.
+- **One finding per cell:** a cell with two hyphen minus signs (`[-0.5, -0.1]`) is one finding, which names the first.
+- **An unresolved input** (one inside a table or figure float, a `longtable` or a `threeparttable`, or one naming a file in `tables/` or `generated/`) holds the baseline while no root of the manuscript resolves it, and the warning names it. Inputs inside `\iffalse … \fi` and `comment` environments are ignored, as are inputs whose name holds a macro parameter (`#1`).
+- **A file the number lint's scanner can't parse** (such as `$$-$0.003$` in a cell) is skipped with a warning, and the baseline isn't lowered while it is.
+- **An input that is a document of its own** (`subfiles`, `standalone`) is read for its body only.
+- **`--report` counts table captions only**, not figure captions.
+- **Committing from a worktree of the paper clone:** git points the hook at the worktree's index and HEAD, so the worktree's staged files and baseline are checked. A new or lowered baseline is written to the main clone's file and staged from there, so the worktree's `.lint_baseline_tables` shows as modified (and the main clone's file may change). The numbers check does the same.
+- **A commit of named paths** (`git commit <paths>`) leaves a baseline the hook set or lowered out of the real index; `/kit:numbers` says how to stage it. This was already true of the numbers check's `.lint_baseline`.
+- **Session start doesn't report table counts.** A table edited on Overleaf first shows up as a blocked local commit.

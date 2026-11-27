@@ -335,3 +335,21 @@ def test_command_passed_literally_does_not_raise():
 def test_missing_argument_at_paragraph_break_still_raises():
     with pytest.raises(LintParseError, match=r"t\.tex:\d+"):
         lint_text("\\section\n\nText", "t.tex")
+
+
+# --- Table layout and glue (table checks spec §3) -----------------------------------------
+@pytest.mark.parametrize("src,expected", [
+    ("a \\vskip -2pt plus 1pt minus 0.5fil b 3", ["3"]),
+    ("a \\vskip2pt b", []),
+    ("a \\hskip\\tabcolsep b 4", ["4"]),
+    ("\\vskip 0.5\\baselineskip 7", ["7"]),
+    ("\\vskip 3 cases", ["3"]),                       # no unit: not glue, so the number is prose
+    ("\\addlinespace[-2pt] 4", ["4"]),
+    ("\\addlinespace 5", ["5"]),
+    ("\\num{0.25} of them", ["0.25"]),               # siunitx stays in the number lint's view
+    ("a\\kern -2pt b \\raise -1ex\\hbox{c} \\lower2pt\\hbox{d}", []),
+    ("\\midrule[-1pt] \\toprule[0.5pt] \\specialrule{.1em}{-.05em}{.05em} \\sisetup{table-format=-1.2}", []),
+    ("\\adjustbox{raise=-1ex}{9 cases}", ["9"]),
+])
+def test_glue_and_addlinespace_are_skipped(src, expected):
+    assert toks(src) == expected

@@ -389,6 +389,23 @@ def test_a_new_library_function_that_copies_another_is_blocked(project, capsys):
     assert "# distinct: <reason>" in err
 
 
+def test_functions_leaving_a_file_dropped_from_the_library_are_moves(project, capsys):
+    """A commit that deletes a library file, drops it from research.yml and splits its functions into new library
+    files: the old near copies inside it are moved, not new (0.4.1)."""
+    big = "big <- function(d) {\n" + "".join(f"  d$v{i} <- d$v{i} + 1\n" for i in range(40)) + "  d\n}\n"
+    cfg = project / ".claude" / "research.yml"
+    cfg.write_text(cfg.read_text().replace("library: [analysis/R]", "library: [analysis/R, analysis/helpers.R]"))
+    stage(project, "analysis/helpers.R", big + POOL_R + POOL_COPY_R)
+    git(project, "add", ".claude/research.yml")
+    git(project, "commit", "-q", "-m", "helpers")
+    git(project, "rm", "-q", "analysis/helpers.R")
+    cfg.write_text(cfg.read_text().replace("library: [analysis/R, analysis/helpers.R]", "library: [analysis/R]"))
+    git(project, "add", ".claude/research.yml")
+    stage(project, "analysis/R/big.R", big)
+    stage(project, "analysis/R/pools.R", POOL_R + POOL_COPY_R)
+    assert gate(project, capsys) == (0, "")
+
+
 def test_distinct_lets_a_real_difference_through(project, capsys):
     stage(project, "analysis/R/lib.R", "load <- function() 1\n" + POOL_R)
     git(project, "commit", "-q", "-m", "pool")

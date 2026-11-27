@@ -23,6 +23,8 @@ def test_attach(tmp_path):
         assert (paper / d / ".gitkeep").is_file()
     assert "/*.pdf" in (paper / ".gitignore").read_text()
     assert (paper / ".lint_baseline").read_text() == "1\n"      # measured, not empty
+    assert (paper / ".lint_baseline_tables").read_text() == "0\n"
+    assert ".lint_baseline_tables" in git_out(paper, "ls-files")
     assert os.access(paper / ".git/hooks/pre-commit", os.X_OK)
     assert "--gate paper" in (paper / ".git/hooks/pre-commit").read_text()
     assert git_out(paper, "rev-list", "--count", "origin/main..HEAD").strip() == "1"  # committed, not pushed
@@ -190,3 +192,12 @@ def test_default_globs_cover_root_and_nested_sections(tmp_path):
     r = subprocess.run(["git", "-C", str(paper), "commit", "-m", "x"], capture_output=True, text=True)
     out = r.stdout + r.stderr
     assert r.returncode != 0 and "intro.tex" in out and "sections/sub/a.tex" in out and "t1.tex" not in out
+
+
+def test_attach_measures_the_table_baseline(tmp_path):
+    table = ("\\begin{table}\\begin{tabular}{lc}\na & -0.5 \\\\\nb & -1 \\\\\n\\end{tabular}\\end{table}\n")
+    bare = bare_overleaf(tmp_path, {"main.tex": MAIN.replace("We had 3 cases.", "\\input{tables/t}"),
+                                    "tables/t.tex": table})
+    p = cmd_new("demo", tmp_path, ["r"])
+    cmd_attach(str(bare), p)
+    assert (p / "paper" / ".lint_baseline_tables").read_text() == "2\n"

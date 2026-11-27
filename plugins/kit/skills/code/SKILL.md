@@ -13,7 +13,7 @@ A request calls the library. When a library function nearly fits, extend it; whe
 
 **(hard rule)** A pipeline script defines no function (an entry point named `main` or `parse_args` aside): the paper's logic lives in the library, and the script calls it.
 
-The kit's pre-commit check blocks a commit whose added lines break either rule, and a new library function that nearly copies one already there (section 4). Tests and archived code are exempt from these checks. The second rule doesn't apply to the library, a package, explore scripts or the run-all script, and a function a script already had may still be edited. A file moved with heavy edits, so that git no longer sees it as moved, counts as new, functions included. A package keeps the first rule in its own form (section 4). "Function" includes a Python class or a named lambda; never rewrite a blocked function as a lambda, `local()` or `assign()` to get past the check: move it into the library.
+The kit's pre-commit check blocks a commit whose added lines break either rule, and a new library function that nearly copies one already there (section 4). Tests and archived code are exempt from these checks. The second rule doesn't apply to the library, a package, explore scripts or the run-all script, and a function a script already had may still be edited. A file moved with heavy edits, so that git no longer sees it as moved, counts as new for these two rules, functions included; the near-copy check still knows its functions by name. A package keeps the first rule in its own form (section 4). "Function" includes a Python class or a named lambda; never rewrite a blocked function as a lambda, `local()` or `assign()` to get past the check: move it into the library.
 
 ## 1. Map first
 
@@ -92,6 +92,7 @@ Then:
 - **Scripts never assign to library variables;** they pass arguments.
 - **A package (`pkg/`)** can't read the project's parameter files, because it must work outside the paper. Its functions take values as arguments, which the calling scripts pass with `param()`; a number in package code is a named constant or a function default, never typed inline, and package code never calls `param()`. The check enforces both.
 - **Tests** go where the project keeps them. If it has none, stop and ask.
+- **An R library folder** is loaded by one file: `"${CLAUDE_PLUGIN_ROOT}/bin/kit" scaffold.py add-loader <folder>` writes and commits `<folder>/load.R`, which sources every `.R` file in the folder except tests (`test_*.R`, `test-*.R`). Scripts start with `source("analysis/params.R")` and then `source("<folder>/load.R")`, each by its path from the script's working folder. Library files hold definitions only, and never source each other: R finds the functions a body calls when it runs, so the order doesn't matter. Read a data path with `param_path()`, as an argument default (`load_survey <- function(path = param_path("survey_data"))`), so a test can pass a small file.
 
 ## 5. Methods and settings
 

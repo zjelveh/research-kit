@@ -1,6 +1,6 @@
 ---
 name: numbers
-description: Use when adding or changing any number, table or figure in the paper or slides, or when a commit is blocked by the numbers check, in a research-kit project.
+description: Use when adding or changing any number, table or figure in the paper or slides, or when a commit is blocked by the numbers or table check, in a research-kit project.
 ---
 
 # Numbers
@@ -42,7 +42,14 @@ Not a result, so `%num-ok` at the end of the line is allowed, with approval: a d
 
 **Packages the scripts need.** R: `renv::install("<name>")`, then `renv::snapshot()`; Python: `uv add <name>`. Commit the lockfile (`renv.lock` or `pyproject.toml` and `uv.lock`) with the script change.
 
-Tables and figures are written by code into the paper's `tables/` and `figures/` folders, never typed. They sit beside the `generated/` folder that holds `numbers.tex`: `paper/tables/` by default, `paper/draft/tables/` for `numbers_tex: paper/draft/generated/numbers.tex`. `tables/` isn't linted, so every number in a table must come from code. Designing a figure, or reviewing one, goes through `/kit:figures`.
+Tables and figures are written by code into the paper's `tables/` and `figures/` folders, never typed. They sit beside the `generated/` folder that holds `numbers.tex`: `paper/tables/` by default, `paper/draft/tables/` for `numbers_tex: paper/draft/generated/numbers.tex`. `tables/` isn't linted for bare numbers, so every number in a table must come from code. Designing a figure, or reviewing one, goes through `/kit:figures`.
+
+**Table checks.** The paper repo's hook also checks the tables the manuscript inputs (`tabular`, `tabular*`, `tabularx` and `longtable`), and every `.tex` file directly in `tables/`:
+- **A negative number printed with a hyphen** in a cell (`-0.18`): LaTeX sets it as a hyphen, not a minus. The code that writes the table prints `$-$0.18` or `\ensuremath{-}0.18`. siunitx `S` and dcolumn `D` columns set their own minus, and so do `\num{}` and its relatives.
+- **A generated macro whose value is a negative number written with a hyphen.** `numbers_build` writes `numbers.tex` with a real minus, so rerun it; a project's own macro file is fixed in the code that writes it.
+- **Stars without a legend,** and **a legend whose thresholds differ** from what most of the paper's tables say.
+
+A value that rounds to zero printed with a real minus (`$-$0.0`) is a warning, not a block; printed with a hyphen (`-0.0`) it is also a hyphen-for-minus finding, which blocks. Drop the sign on a point estimate, and on an interval bound show more decimals (`$-$0.04`), since the sign says the interval reaches below zero. `numbers.tex` drops the sign of a value that rounds to zero, so give an interval bound's macro enough decimals in its format. A star legend typed in the manuscript's own files is read by the numbers check too, so its thresholds need `%num-ok`, or write the legend in the table file. A line whose comment starts with `%table-ok: <reason>` drops that line's findings; `%legend-ok: <reason>` anywhere in a table drops its legend findings, for a legend given elsewhere. The table check has its own ratchet and baseline, `.lint_baseline_tables`, beside the numbers baseline; the first time the hook runs without one, it starts from the last commit's count. `lint_tables.py --report` lists where the paper mixes two forms of one thing (p-values with and without a leading zero, captions with and without a final period, thousands separators, a talk's star thresholds against the paper's). Which form to use is the project's choice; the report only shows the mix.
 
 ## When a commit is blocked
 
@@ -59,11 +66,26 @@ Commit blocked: replace the new numbers with macros, or end the line with %num-o
 - Each new one becomes a macro if it is a result, or gets `%num-ok` with approval if it isn't.
 - **The ratchet:** a commit that raises the count is blocked, and a commit that lowers it lowers the baseline and stages that file in the same commit. Never edit a baseline by hand, and never commit with `--no-verify`.
 
+In the paper repo the table check runs in the same hook and prints its own block:
+```
+tables [index]: count=N baseline=B REGRESSION
+  tables/table_main.tex:14: hyphen for minus: -0.182
+  sections/results.tex:120: stars without a legend: **, ***
+  warning: tables/table_main.tex:20: negative zero: $-$0.0 (...)
+Commit blocked: print negatives with a real minus ($-$ or \ensuremath{-}) in the code that writes the table, give every star a legend, or end the line with %table-ok: <reason> (%legend-ok: <reason> for a legend given elsewhere).
+```
+A legend finding is reported at the `\begin` line of the table's outermost float. Both checks always run, the commit is blocked if either fails, and neither baseline moves unless both pass. Fix each new finding in the code that writes the table (or rerun `numbers_build`), or end the line with `%table-ok: <reason>` with approval.
+
+**A commit of named paths** (`git commit <paths>`) runs the hook on git's temporary index, so a baseline the hook sets or lowers is committed but the real index keeps the old one. After such a commit whose hook printed `baseline set` or `baseline lowered`, run `git -C <paper> add .lint_baseline_tables` (and `.lint_baseline` for `paper: baseline lowered`), so the next commit is checked against the new baseline.
+
 To check without committing:
 ```
 "${CLAUDE_PLUGIN_ROOT}/bin/kit" lint_numbers.py --project "${CLAUDE_PROJECT_DIR}" --gate paper -v
 ```
-(`--gate slides` for the talks.)
+(`--gate slides` for the talks.) The table check on its own, with every finding:
+```
+"${CLAUDE_PLUGIN_ROOT}/bin/kit" lint_tables.py --project "${CLAUDE_PROJECT_DIR}" -v
+```
 
 ## Session-start lines
 
@@ -78,12 +100,12 @@ Known lint edge cases and their workarounds are in [KNOWN-ISSUES.md](../../KNOWN
 - [ ] Every new or changed result in the paper or slides is a macro, generated from a committed source.
 - [ ] `numbers_build.py` exited 0, and `numbers.tex` and the ledger changed together.
 - [ ] Every `%num-ok` marks a non-result and was approved.
-- [ ] The numbers check passes for each repo touched.
+- [ ] The numbers check passes for each repo touched, and the table check for the paper.
 - [ ] Changes were committed, and pushed unless the user declined.
 
 ## Stop and ask
 - A value can only be typed, not computed from a committed source.
-- `numbers_build.py` or `lint_numbers.py` exits 2.
+- `numbers_build.py`, `lint_numbers.py` or `lint_tables.py` exits 2.
 - It's unclear whether a number is a result.
 - A false positive isn't listed in `KNOWN-ISSUES.md`.
 - A macro in use would have to be renamed.

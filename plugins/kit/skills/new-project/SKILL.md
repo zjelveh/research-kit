@@ -46,7 +46,7 @@ description: Use when the user wants to start a new research paper project with 
    GIT_TERMINAL_PROMPT=0 git -C <project>/paper fetch
    ```
    It must exit 0 without asking for anything.
-2. **Overleaf kept the dotfiles.** Clone fresh into a temporary directory and confirm that `.gitignore`, `.lint_baseline`, `generated/.gitkeep`, `figures/.gitkeep` and `tables/.gitkeep` are all there. The three folders sit beside `numbers_tex`'s folder: at the clone's root by default, or in the manuscript's subfolder if `numbers_tex` points into one (`draft/generated/`). For the default layout:
+2. **Overleaf kept the dotfiles.** Clone fresh into a temporary directory and confirm that `.gitignore`, `.lint_baseline`, `.lint_baseline_tables`, `generated/.gitkeep`, `figures/.gitkeep` and `tables/.gitkeep` are all there. The three folders sit beside `numbers_tex`'s folder: at the clone's root by default, or in the manuscript's subfolder if `numbers_tex` points into one (`draft/generated/`). For the default layout:
    ```
    D=$(mktemp -d) && GIT_TERMINAL_PROMPT=0 git clone -q <overleaf-git-url> "$D/check" && ls -a "$D/check" "$D/check/generated" "$D/check/figures" "$D/check/tables"
    ```

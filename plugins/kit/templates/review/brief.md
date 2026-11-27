@@ -48,6 +48,8 @@ reads of the library's data, found by text:
   number, date or path instead of reading a parameter, or adds a second writer of a paper output.
 - A library function that nearly copies another (the map's near copies), or a `# distinct:` reason that
   doesn't hold: one function with an argument should do for both.
+- In tables: a negative number printed with a hyphen, stars without a legend, or a legend whose thresholds
+  differ from the paper's other tables.
 - Results files and numbers that do not follow from the code. Reproduce key numbers with your own code
   where you can.
 - Paths that matter but no test exercises.

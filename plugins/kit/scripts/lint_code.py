@@ -25,11 +25,14 @@ from __future__ import annotations
 import argparse
 import ast
 import os
+import posixpath
 import re
 import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kit_params  # noqa: E402
@@ -37,7 +40,7 @@ import near_copy  # noqa: E402
 from code_scan import (CODE_SUFFIXES, DATE, ENTRY_POINTS, FILE_EXT, R_ASSIGN, R_DEF, R_STRING,  # noqa: E402
                        classify, code_files, depth_change, git_names, in_scope, kits_reader, library_folders,
                        lines_of, literals, parse_python, split_comment, top_level_definitions)
-from kitlib import KitError, find_project, git, load_config  # noqa: E402
+from kitlib import CONFIG_REL, KitError, find_project, git, load_config  # noqa: E402
 
 ALLOWED_NUMBERS = {0, 1, 2, 100}
 ESCAPE = re.compile(r"\bliteral:\s*\S")
@@ -255,6 +258,20 @@ def _blobs(project: Path, names: list[str]) -> dict[str, str]:
     return out
 
 
+def library_then(project: Path, rev: str, library: list[str]) -> list[str]:
+    """Today's library entries and those research.yml listed at `rev`, so that a function leaving a file the change
+    drops from the library key counts as moved, not new."""
+    text = _git_text(project, "show", f"{rev}:{CONFIG_REL.as_posix()}", check=False)
+    try:
+        old = yaml.safe_load(text) if text else None
+    except yaml.YAMLError:
+        old = None
+    entries = old.get("library") if isinstance(old, dict) else None
+    then = {posixpath.normpath(e.strip()) for e in entries if isinstance(e, str) and e.strip()} \
+        if isinstance(entries, list) else set()
+    return sorted(set(library) | {e for e in then if e != "." and not e.startswith("..")})
+
+
 def library_texts(project: Path, cfg: dict, library: list[str], rev: str | None) -> dict[str, str]:
     """The library's code files as they are in the working tree (rev None), the index (rev ""), or a commit."""
     if not library:
@@ -365,7 +382,8 @@ def precommit(project: Path) -> list[str]:
         head = _git_text(project, "rev-parse", "-q", "--verify", "HEAD^{commit}", check=False).strip()
         out += near_copies(library_texts(project, cfg, library, ""), new,
                            {f: old for f, (_, old) in staged.items()},
-                           library_texts(project, cfg, library, "HEAD") if head else None)
+                           library_texts(project, cfg, library_then(project, "HEAD", library), "HEAD")
+                           if head else None)
     return out
 
 
@@ -403,7 +421,8 @@ def changed(project: Path, files: list[str], base: str | None = "HEAD") -> list[
             new[rel], olds[rel] = lines, old
     if new:
         out += near_copies(library_texts(project, cfg, library, None), new, olds,
-                           library_texts(project, cfg, library, base) if base is not None else None)
+                           library_texts(project, cfg, library_then(project, base, library), base)
+                           if base is not None else None)
     return out
 
 

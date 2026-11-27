@@ -19,7 +19,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from kitlib import (CONFIG_REL, LANGUAGES, PLUGIN_ROOT, KitError, find_project, git, load_config,  # noqa: E402
                     package_name_problem, paper_folders, personal_config, personal_dir, stable_kit)
+from code_scan import library_folders  # noqa: E402
 import lint_numbers  # noqa: E402
+import lint_tables  # noqa: E402
 
 TEMPLATES = PLUGIN_ROOT / "templates"
 
@@ -623,6 +625,42 @@ def cmd_add_params(project: Path) -> list[str]:
     return created
 
 
+LOADER = "load.R"
+
+
+def cmd_add_loader(folder: str, project: Path) -> str | None:
+    """Write the kit's R loader into a library folder (code spec section 4) and commit only it: every .R file there
+    is then loaded by one source() of load.R. Refreshes a loader from an older kit; refuses a load.R the kit didn't
+    write. The path committed, or None when the loader is already current."""
+    project = find_project(Path(os.path.abspath(project)))
+    require_toplevel(project)
+    cfg = load_config(project)
+    if "r" not in cfg["languages"]:
+        raise KitError("add-loader writes an R loader, and languages in research.yml has no r")
+    rel = Path(os.path.normpath(folder)).as_posix().rstrip("/")
+    folders = [f for f in library_folders(project, cfg) if (project / f).is_dir()]
+    if rel not in folders:
+        raise KitError(f"{folder} is not a library folder in research.yml"
+                       + (f" (library folders: {', '.join(folders)})" if folders else " (it lists none)"))
+    target = f"{rel}/{LOADER}"
+    src = TEMPLATES / "lib" / LOADER
+    if (project / target).exists():
+        if not kits_file(project / target):
+            raise KitError(f"{target} already exists and is not the kit's; rename or move it, then rerun add-loader")
+        if (project / target).read_bytes() == src.read_bytes():
+            print(f"add-loader: {target} is current")
+            return None
+        if git(project, "status", "--porcelain", "--", target).strip():
+            raise KitError(f"{target} has uncommitted changes; commit or discard them, then rerun add-loader")
+    refuse_ignored(project, [target])
+    shutil.copyfile(src, project / target)
+    git(project, "add", "--", target)
+    git(project, "commit", "-q", "-m", f"Add the R library loader {target} (research-kit)", "--", target)
+    print(f"add-loader: committed {target} in {project} (not pushed). Scripts load the library with "
+          f'source("analysis/params.R") and then source("{target}").')
+    return target
+
+
 def set_paper_branch(project: Path, branch: str) -> None:
     cfg = project / ".claude" / "research.yml"
     text = cfg.read_text(encoding="utf-8")
@@ -676,6 +714,7 @@ def cmd_attach(url: str, project: Path) -> Path:
     paper = (project / cfg["paper_dir"]).resolve()
     folders = paper_folders(project, cfg, paper)
     _, globs, base_rel = lint_numbers.gate_paths(project, cfg, "paper")
+    tables_rel = lint_tables.paper_paths(project, cfg)[-1]
     if paper.exists():
         if not reusable_clone(paper, url):
             raise KitError(f"{paper} already exists (a rerun reuses it only if it is an untouched clone of {url}: "
@@ -686,7 +725,8 @@ def cmd_attach(url: str, project: Path) -> Path:
         if proc.returncode != 0:
             raise KitError(f"git clone {url} failed (exit {proc.returncode}); see the message above")
     start = git(paper, "rev-parse", "HEAD").strip()
-    created = [d for d in folders if not d.exists()] + [p for p in [paper / base_rel] if not p.exists()]
+    created = [d for d in folders if not d.exists()] + [p for p in [paper / base_rel, paper / tables_rel]
+                                                        if not p.exists()]
     try:
         branch = git(paper, "rev-parse", "--abbrev-ref", "HEAD").strip()
         if branch != cfg["paper_branch"]:
@@ -708,10 +748,12 @@ def cmd_attach(url: str, project: Path) -> Path:
         ignore.write_text("\n".join(have + [w for w in wanted if w not in have]) + "\n", encoding="utf-8")
         count = sum(len(lint_numbers.lint_text(t, n)) for n, t in files.items())
         (paper / base_rel).write_text(f"{count}\n", encoding="utf-8")
+        table_count = lint_tables.check(project, cfg, "worktree").count
+        (paper / tables_rel).write_text(f"{table_count}\n", encoding="utf-8")
         git(paper, "add", "-A")
         if git(paper, "status", "--porcelain").strip():   # a paper attached before may need nothing new
             git(paper, "commit", "-q", "-m",
-                "Add research-kit scaffolding (generated/, figures/, tables/, .gitignore, numbers baseline)")
+                "Add research-kit scaffolding (generated/, figures/, tables/, .gitignore, number and table baselines)")
         install_hook(paper, project, "paper")
     except BaseException as e:
         try:
@@ -724,7 +766,8 @@ def cmd_attach(url: str, project: Path) -> Path:
             raise KitError(f"{e} — {kept}") from None
         print(f"attach-paper: {kept}", file=sys.stderr)
         raise
-    print(f"Attached {paper} (branch {branch}, numbers baseline {count}). Committed locally, NOT pushed.\n"
+    print(f"Attached {paper} (branch {branch}, numbers baseline {count}, table baseline {table_count}). "
+          f"Committed locally, NOT pushed.\n"
           f"Review, then push with: git -C {paper} push\n"
           f"Optional GitHub backup: git -C {paper} remote add github <url> && git -C {paper} push github {branch}")
     return paper
@@ -861,6 +904,9 @@ def main(argv: list[str] | None = None) -> int:
     ih.add_argument("--project", type=Path, default=Path.cwd())
     ap_ = sub.add_parser("add-params")
     ap_.add_argument("--project", type=Path, default=Path.cwd())
+    lo = sub.add_parser("add-loader")
+    lo.add_argument("folder", help="an R library folder named in research.yml's library key")
+    lo.add_argument("--project", type=Path, default=Path.cwd())
     a = ap.parse_args(argv)
     try:
         if a.cmd == "new":
@@ -876,6 +922,8 @@ def main(argv: list[str] | None = None) -> int:
             cmd_install_hooks(a.project)
         elif a.cmd == "add-params":
             cmd_add_params(a.project)
+        elif a.cmd == "add-loader":
+            cmd_add_loader(a.folder, a.project)
         else:
             cmd_add_package(a.lang, a.project, a.name)
     except KitError as e:

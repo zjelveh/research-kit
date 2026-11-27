@@ -424,3 +424,26 @@ def test_make_numbers_template_loads_the_emitter_from_the_environment():
     py_tpl = (PLUGIN_ROOT / "templates/lang/python/analysis/numbers/make_numbers.py").read_text()
     assert 'Sys.getenv("KIT_NUMBERS_EMIT")' in r_tpl and 'os.environ.get("KIT_NUMBERS_EMIT")' in py_tpl
     assert "KIT_ROOT" not in r_tpl + py_tpl
+
+
+@pytest.mark.parametrize("value,fmt,ledger_value,written", [
+    ("-1.234", "%.2f", "-1.23", "\\ensuremath{-}1.23"),
+    ("-0.04", "%.1f", "0.0", "0.0"),                          # a negative zero loses its sign
+    ("-0.5", "%.1f%%", "-0.5\\%", "\\ensuremath{-}0.5\\%"),
+    ("-1234567", "%s", "-1234567", "\\ensuremath{-}1234567"),
+    ("-0.00001", "%g", "-1e-05", "\\ensuremath{-}1e-05"),
+    ('"-a"', "%s", "-a", "-a"),                              # not a number: unchanged
+    ("2.5", "%.1f", "2.5", "2.5"),
+])
+def test_negatives_print_a_real_minus(tmp_path, value, fmt, ledger_value, written):
+    entry = f'list(name = "x", value = {value}, format = "{fmt}", src = "analysis/summary.csv")'
+    p = project(tmp_path, r=r_script(entry))
+    assert numbers_build.main(["--project", str(p)]) == 0
+    assert tex(p)[1].startswith("\\newcommand{\\x}{" + written + "}% src=")
+    assert f"| `\\x` | {ledger_value} |" in ledger(p)
+
+
+def test_a_dot_number_and_a_grouped_number_are_signed_numbers():
+    assert numbers_build.signed("-.5") == ("-.5", "\\ensuremath{-}.5")
+    assert numbers_build.signed("-1{,}234") == ("-1{,}234", "\\ensuremath{-}1{,}234")
+    assert numbers_build.signed("-0{,}000") == ("0{,}000", "0{,}000")
