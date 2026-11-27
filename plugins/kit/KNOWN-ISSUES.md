@@ -26,7 +26,7 @@ These are rare edge cases that have been accepted rather than fixed. The bar for
 ### Valid LaTeX that still raises (rare; usually preamble-only)
 
 - **`$$` inside a table cell**, for example `$$-$0.003$`. Inside a cell TeX reads this as an empty formula followed by a new one.
-- **Known commands that really are missing an argument**, for example `\patchcmd{\section}…`. This is typical of a preamble, which is never scanned. A command passed as a token in braces, `{\section}`, is handled.
+- **Known commands that really are missing an argument**, for example a `\section` with nothing after it at the end of a file. This is typical of a preamble, which is never scanned. A command passed as a token in braces, as in `\patchcmd{\section}…`, is handled.
 - **URL commands from other packages** (`\doi`, `\nolinkurl`, `\path`, `\qrcode`) are not read raw, so a `%` inside them raises.
 
 ### Diagnostics
@@ -40,7 +40,7 @@ These are rare edge cases that have been accepted rather than fixed. The bar for
 ## Numbers lint CLI (`lint_numbers.py --gate …`)
 
 - `--write-baseline` ignores `--git-ref` and `--index` and always counts the working tree.
-- `git()` calls inherit `GIT_INDEX_FILE` and `GIT_DIR`. This is harmless today, because only the slides gate runs inside the code repo's hook.
+- `git()` calls inherit `GIT_INDEX_FILE` and `GIT_DIR`. The checks rely on this: inside a hook they read the commit's own index, so a commit of named paths, or one made from a worktree, checks the files that commit stages.
 - A new project's first commit must stage `.lint_baseline` before the hook runs, because in index mode the baseline is read from the index. The scaffold already does this.
 
 ## Small checks
@@ -56,14 +56,12 @@ These are rare edge cases that have been accepted rather than fixed. The bar for
 - A failed `attach-paper` leaves `research.yml` with the detected branch. Rerunning `attach-paper` sets it again, so this is harmless.
 - A rerun reuses a kept clone only if its origin URL matches the given one exactly; the same project given as a different URL spelling (a trailing `.git`) is refused as "already exists".
 - A branch name that YAML reads specially (`yes`, `null`, `123`) would be written without quotes.
-- A project name containing `/` raises a raw `FileNotFoundError`.
 - Group write is not enforced: `set_group` sets only the group and setgid, so the umask decides the mode. The `paper/` clone is not passed through `set_group`.
 - Hooks embed the project's absolute path, so moving a project breaks them; rerun `scaffold.py install-hooks` there.
 - A `"` in the git user name is not escaped in `DESCRIPTION`.
 
 ## Numbers builder (`numbers_build.py`, `numbers_emit.R`/`.py`)
 
-- Negative values come out with a text-mode hyphen (`-0.50`). Wrap them in math in the paper if that matters.
 - Only `%` is escaped in values: `_ # & $` in string values are not, and a `|` in a value breaks the ledger table row.
 - If the ledger's rename fails, `numbers.tex` is restored. Only if that restore also fails is `numbers.tex` left ahead of the ledger, and the error says so. This is very unlikely.
 

@@ -62,7 +62,7 @@ Types are categorical, ordinal or quantitative. An attribute the base layout doe
    - Each reference mark is drawn, and its meaning is labelled in the image or given in the caption, as its `label_in` says.
    - The figure style in effect applies: read the file that `"${CLAUDE_PLUGIN_ROOT}/bin/kit" which figure-style` prints, in full.
    - The output is a vector PDF in the paper's figures folder.
-   - The output path and every size or number the code needs (the printed width, a reference value) are parameters in `analysis/params.yml`, read with `param()`, never typed (`/kit:code`).
+   - The output path and every size or number the code needs (the printed width, a reference value) are parameters in `analysis/params.yml`, read with `param()`, never typed (`/kit:code`). So is the look the paper's figures share (figure sizes, line widths, marker sizes, font sizes, the palette as a list of strings): a library style function applies them, and each figure function uses it. In a library folder the style function reads them with `param()`; in a package it takes them as arguments, which the driver passes with `param()`. `# literal: <reason>` is only for a number that isn't a design choice, such as an index into a fixed structure.
    - The title, in the image or as the caption's first clause, names what is plotted, not the finding.
    - Every number in a label or annotation comes from code (`/kit:numbers`).
 6. **Render and look.** Run the script, convert the PDF to an image in your scratch folder (`pdftoppm -png -r 150 -singlefile <pdf> <scratch>/<figure>`), and look at it. Then run the check again without `--draft`.

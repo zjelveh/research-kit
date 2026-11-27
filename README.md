@@ -59,8 +59,8 @@ flowchart TB
 - **Session start.** Every session in a kit project begins with the rules, the project's current state (`state/CURRENT_STATE.md`) and a status block: uncommitted changes, new commits on Overleaf, hand-typed numbers in the paper and the slides, and the code review status. Outside kit projects the kit does nothing.
 - **Analysis code.** The project's library is the paper's code as it will be released: every step that produces a result in the paper is a function there, and pipeline scripts are thin drivers that call it. Before writing code, `/kit:code` has Claude read a map of the library's functions and the parameters. A quick question gets a short, dated script in `analysis/explore/` that calls the library, instead of a fresh copy of the loading and sample logic. A git hook blocks a commit that adds a function to a pipeline script.
 - **Parameters.** Every number, date and path the code uses lives in `analysis/params.yml`, with a comment saying what it is and why, and code reads it with `param("name")`. A git hook blocks a commit that types such a value on a new or edited line.
-- **Generated numbers.** Each language's `make_numbers` script writes `numbers.tex`, one LaTeX macro per result, and the claims ledger records which script produced each one. The paper and the talks use the macros. A git hook blocks a commit that adds a hand-typed number to the paper or the slides, and, in the paper, a table that prints a negative number with a hyphen, uses stars its legend doesn't define, or gives a star a different threshold from the paper's other tables.
-- **Figures.** `/kit:figures` records each figure's data, the reader's task and the chosen idiom in a short spec, checks the design against a catalogue of 52 visualization idioms, and only then writes the plotting code.
+- **Generated numbers and tables.** Each language's `make_numbers` script writes `numbers.tex`, one LaTeX macro per result, and the claims ledger records which script produced each one. The paper and the talks use the macros. A git hook blocks a commit that adds a hand-typed number to the paper or the slides, and, in the paper, a table that prints a negative number with a hyphen, uses stars without a legend, or gives a star a different threshold from the paper's other tables. See [The paper's checks](#the-papers-checks).
+- **Figures.** `/kit:figures` records each figure's data, the reader's task and the chosen idiom in a short spec, checks the design against a catalogue of 52 visualization idioms, and only then writes the plotting code, as a library function whose sizes and other numbers are parameters.
 - **Prose.** `/kit:writing` works from the paper's argument down: a short argument file, a section outline you approve, the whole section drafted and read in context, and line edits last.
 - **Checkpoints.** `/kit:checkpoint` updates `CURRENT_STATE.md` before a session ends, so the next session starts where this one stopped.
 - **Code review.** With the Codex CLI installed, `/kit:review` has Codex review a code change. Claude then checks each finding against the code and proposes fixes for your approval.
@@ -85,11 +85,15 @@ claude plugin install kit@research-kit
 
 The `/kit:` skills are available in every project. The session-start hook runs only in kit projects (folders with `.claude/research.yml`) and is silent everywhere else.
 
-To update: `claude plugin marketplace update research-kit`, then `claude plugin update kit@research-kit`. A project made with an earlier version gets the parameter files and the code gate with `kit scaffold.py add-params`, and running it again after an update refreshes the kit's readers; see [Analysis code and parameters](#analysis-code-and-parameters).
+To update: `claude plugin marketplace update research-kit`, then `claude plugin update kit@research-kit`. After an update:
+- A project made before the parameter files gets them, and the code gate, with `kit scaffold.py add-params`. Running it again refreshes the kit's readers; see [Analysis code and parameters](#analysis-code-and-parameters).
+- A paper attached before 0.5.0 needs nothing for the table check: its first paper commit sets the table baseline from the last commit's count.
 
 ## Quick start
 
 In Claude Code, run `/kit:new-project <name>`. The first time, it runs `kit setup`, which creates a small Python environment in `~/.local/share/research-kit` (this needs uv). It then asks which languages the paper uses and which folder the project goes in, creates the project and walks you through attaching the Overleaf clone.
+
+Later, `kit scaffold.py add-language r|python` adds a language to the project, `add-package r|python` gives it its own package, and `install-hooks` reinstalls the commit hooks after the project folder moves.
 
 ## A kit project
 
@@ -105,7 +109,9 @@ my-paper/
 │   └── run_all.R or .py      runs the pipeline's driver scripts in order, once the project has some
 ├── pkg/                      the project's own R or Python package, if it has one
 ├── paper/                    git clone of the Overleaf project
-│   └── generated/            numbers.tex and notation.tex, written by the kit
+│   ├── generated/            numbers.tex and notation.tex, written by the kit
+│   ├── tables/, figures/     written by the analysis code, never typed
+│   └── .lint_baseline, .lint_baseline_tables   the paper checks' baselines
 ├── slides/                   Beamer talks
 ├── notes/                    argument, outlines, research questions, memos, notation, literature, figure specs
 └── state/                    CURRENT_STATE.md, DECISIONS.md, CLAIMS_LEDGER.md
@@ -131,7 +137,7 @@ my-paper/
 
 ## Analysis code and parameters
 
-**The library.** The library is the paper's code as it will be released: every step that produces a result in the paper (data preparation, samples, estimation, the computations behind each number, the tables and the figures) is a function there. It is the project's package under `pkg/`, or the folders and files named in `library:` in `.claude/research.yml`, such as `library: [analysis/R]`. Pipeline scripts are thin drivers that read parameters, call the library in order and write outputs, and a run-all script runs them, so a replicator runs one command. The `make_numbers` scripts are drivers too: they read values from committed results, and anything they compute comes from a library function. A request calls the library; a library function that nearly fits is extended; a genuine one-off goes in an explore script that calls the library. `kit code_map.py --project .` prints the library's functions, with how many files call each one, and the parameters, with the scripts that use them. `--files <files>` checks changed files for typed values, repeated code, near copies of functions, paper outputs with several writers and data read around the library; `--all` lists everything, for a clean-up.
+**The library.** The library is the paper's code as it will be released: every step that produces a result in the paper (data preparation, samples, estimation, the computations behind each number, the tables and the figures) is a function there. It is the project's package under `pkg/`, or the folders and files named in `library:` in `.claude/research.yml`, such as `library: [analysis/R]`. An R library folder is loaded by one file: `kit scaffold.py add-loader analysis/R` writes and commits `analysis/R/load.R`, which sources every `.R` file in the folder except tests, so a script starts with `source("analysis/params.R")` and `source("analysis/R/load.R")`. Pipeline scripts are thin drivers that read parameters, call the library in order and write outputs, and a run-all script runs them, so a replicator runs one command. The `make_numbers` scripts are drivers too: they read values from committed results, and anything they compute comes from a library function. A request calls the library; a library function that nearly fits is extended; a genuine one-off goes in an explore script that calls the library. `kit code_map.py --project .` prints the library's functions, with how many files call each one, and the parameters, with the scripts that use them. `--files <files>` checks changed files for typed values, repeated code, near copies of functions, paper outputs with several writers and data read around the library; `--all` lists everything, for a clean-up.
 
 **The parameter files.** `analysis/params.yml` holds what the pipeline uses, and a change to one of its values needs your approval. `analysis/explore/params.yml` holds the one-off values of quick questions. The format is a small subset of YAML that R and Python read without packages:
 
@@ -144,16 +150,32 @@ panel_years: [1990, 2019]
 analysis_data: 'data/analysis.parquet'
 ```
 
-Each entry has a comment line above it. Values are numbers, single-quoted strings (dates and paths always quoted), `true` or `false`, or a one-line list. Scripts read values with `param("min_group_size")`, after `source("analysis/params.R")` in R or, in Python, putting `analysis/` on `sys.path` and `from params import param, param_path`. `param_path("analysis_data")` gives a path parameter joined to the project root. The readers find the parameter files from their own place, so scripts may run from any folder in the project. An unknown name, or a missing `analysis/params.yml`, is an error. A package can't read the parameter files, since it has to work outside the paper; its functions take values as arguments, and the calling script passes `param(...)`.
+Each entry has a comment line above it. Values are numbers, single-quoted strings (dates and paths always quoted), `true` or `false`, or a one-line list. Scripts read values with `param("min_group_size")`, after `source("analysis/params.R")` in R or, in Python, putting `analysis/` on `sys.path` and `from params import param, param_path`. `param_path("analysis_data")` gives a path parameter joined to the project root. The readers find the parameter files from their own place, so scripts may run from any folder in the project. An unknown name, or a missing `analysis/params.yml`, is an error. Figure sizes, line widths, marker sizes, font sizes and the palette are parameters too, so a figure's look is set in one place and the plotting code types no numbers. A package can't read the parameter files, since it has to work outside the paper; its functions take values as arguments, and the calling script passes `param(...)`.
 
 **The code gate.** The code repo's pre-commit hook flags, on the lines a commit adds or changes:
 - numbers other than 0, 1, 2 and 100, dates, and paths or file names. A line that has to keep a value ends with `# literal: <reason>`, which `/kit:review` sees;
 - a new function or class defined in a pipeline script (a driver's `main` or `parse_args` aside). Functions belong in the library. The library, packages, explore scripts and the run-all script may define them, and a function a script already had may still be edited;
+- a `param()` name that neither parameter file has, an explore parameter read by pipeline code, or `param()` called in a package. A format problem in a parameter file blocks every commit until it is fixed;
 - a new library function that nearly copies another library function once local names and values are set aside, such as a pool loader with a cutoff of 30 beside the same loader with 20. One function with an argument does for both; a real difference ends the definition line with `# distinct: <reason>`.
 
 Tests, archived code (`archive/`, `legacy/`), `renv/` and hidden folders are exempt from these checks. `kit lint_code.py --project . --all` counts a project's existing findings by file.
 
 **Projects made before these files.** Run `kit scaffold.py add-params` in the project. It adds the parameter files and readers the project lacks, ignores `analysis/explore/out/`, commits those files, and turns the code gate on. It refuses, and changes nothing, if the project has its own file of the same name. Existing code keeps committing: only new and edited lines are checked, and a function a script already had may still be edited.
+
+## The paper's checks
+
+The paper's clone gets its own pre-commit hook, which runs two checks on what the commit stages. A commit is blocked if either check finds more problems than its baseline allows.
+
+**Numbers.** A number typed in the manuscript instead of a macro from `numbers.tex`. A number that isn't a result (a year, a conventional threshold such as `$\alpha = 0.05$`, a number in a name) keeps its line with `%num-ok` at the end. The talks in `slides/` get the same check from the code repo's hook.
+
+**Tables.** The tables the manuscript inputs, and every `.tex` file directly in `tables/`, are checked for:
+- a negative number printed with a hyphen (`-0.18`), which LaTeX sets as a hyphen, not a minus. The code that writes the table prints `$-$0.18` or `\ensuremath{-}0.18`; siunitx and dcolumn columns set their own minus. `numbers.tex` already prints its negatives with a real minus;
+- significance stars with no legend in the table;
+- a legend whose thresholds differ from what most of the paper's tables say.
+
+A negative zero printed with a real minus (`$-$0.0`) and a table input the check can't find are warnings, not blocks; a negative zero printed with a hyphen (`-0.0`) blocks, as a hyphen. A line that has to keep a form ends with `%table-ok: <reason>`, and a table whose legend is given elsewhere carries `%legend-ok: <reason>`. `kit lint_tables.py --project . --report` lists where the paper mixes two forms of one thing, such as p-values with and without a leading zero, or captions with and without a final period. Which form to use is the project's choice; the report only shows the mix.
+
+**The ratchet.** Each check counts its findings in the whole paper and keeps the count in a baseline file: `.lint_baseline` for numbers, `.lint_baseline_tables` for tables. A commit that raises a count is blocked; a commit that lowers it lowers the baseline in the same commit (the table baseline holds while a table input is unresolved or a file can't be read). So an existing paper keeps committing from the day it's attached, and the counts only go down. `kit lint_numbers.py --project . --gate paper -v` and `kit lint_tables.py --project . -v` list the findings without committing.
 
 ## Changing the defaults
 

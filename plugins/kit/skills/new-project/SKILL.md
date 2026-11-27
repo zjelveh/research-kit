@@ -72,7 +72,7 @@ Tell the user:
 - [ ] `scaffold.py new` and `attach-paper` both succeeded, and the attach commit is pushed.
 - [ ] The credential helper is scoped to `https://git.overleaf.com`, and the token never appeared in this conversation.
 - [ ] The prompt-free fetch exits 0.
-- [ ] A fresh clone contains all five dotfiles.
+- [ ] A fresh clone contains all six files.
 - [ ] `notation.tex` and `numbers.tex` exist and were committed, and pushed unless the user declined.
 
 ## Stop and ask
