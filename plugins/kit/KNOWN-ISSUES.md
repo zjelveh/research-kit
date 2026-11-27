@@ -104,11 +104,15 @@ These are rare edge cases that have been accepted rather than fixed. The bar for
 - **Paths built from pieces** (`file.path("data", "clean")`), **years typed as strings** (`"2019"`), and dates written in words.
 - **Functions defined in unusual ways:** R `assign()`, `<<-`, `local(function(...))`, or `function` on the line after `<-`; Python `def` inside a top-level `if`, `try` or `with`. The skill says never to use these to get past the check.
 - **A squash merge** has no `MERGE_HEAD`, so every line it brings counts as added.
+- **A merge that commits on its own** (`git merge` without conflicts) runs git's `pre-merge-commit` hook, not `pre-commit`, and the kit installs only `pre-commit`; so no kit check sees it, in the code repo or the paper clone. A merge that stops (conflicts, `--no-commit`) is checked when it is committed.
+- **Archived R code outside the four archive folder names.** `docs/` and `notes/` count as archived code for the other rules, but the `.renvignore` rule covers only `archive/`, `_archive/`, `legacy/` and `retired/`: a `.renvignore` in `docs/` would turn off `.gitignore` there, since renv reads one or the other in each folder. Archived R code no commit touches is not checked either; `lint_code.py --all` lists its folders.
+- **Archived R the `.renvignore` check doesn't see:** R-kernel notebooks (`.ipynb`) and extensionless scripts with an R shebang, which renv reads; and a symlinked archive folder, whose files git doesn't track. A `.renvignore` whose later `!` lines or profile sections bring files back in is still accepted. An archive folder holding only files renv reads by name (`.Rproj`, `_quarto.yml`, `_bookdown.yml`, `_pkgdown.yml`, `.lintr`, `renv.lock`) isn't flagged; and R code under folders renv skips anyway (`packrat/`, `revdep/`, `vendor/`) is flagged for nothing.
 
 ### Blocked although legitimate (end the line with `# literal: <reason>`, or move the code)
 
 - **Strings with a slash and no spaces** count as paths, so a label like `"Black/White"` is flagged. A URL is flagged on purpose: it is a data location.
 - **Command-line functions** (click or typer commands) in a pipeline script are blocked; they belong in the library, with the script calling them.
+- **An archive folder that a parent `.renvignore` already leaves out** still needs its own `.renvignore`: the check reads only the archive folder's file.
 - **A file moved with heavy edits** (under git's 50% similarity) counts as new, so its old functions and typed values are flagged too.
 
 ### Behaviour notes

@@ -15,6 +15,7 @@ from kitlib import KitError, git
 CODE_SUFFIXES = (".R", ".r", ".py")
 SKIP_DIRS = {"renv", ".venv"}
 ARCHIVE_DIRS = {"archive", "_archive", "legacy", "retired"}
+R_SUFFIXES = (".r", ".rmd", ".rmarkdown", ".qmd", ".rnw")  # lowercased: the files renv reads for packages
 TEST_DIRS = {"tests", "test"}
 TEST_FILE = re.compile(r"(test_.*\.py|.*_test\.py|test_.*\.[Rr]|test-.*\.[Rr]|conftest\.py|testthat\.R)")
 FILE_EXT = re.compile(r"\.(csv|tsv|txt|parquet|feather|rds|rda|rdata|dta|xls|xlsx|json|yaml|yml|pkl|pickle|"
@@ -130,10 +131,21 @@ def lines_of(text: str) -> list[str]:
     return text.split("\n")
 
 
+def own_path(rel: str, cfg: dict) -> bool:
+    """A file of the project's own: not in renv/, .venv/, a hidden folder or the paper clone."""
+    return not rel.startswith(cfg["paper_dir"].rstrip("/") + "/") \
+        and not any(d in SKIP_DIRS or d.startswith(".") for d in rel.split("/")[:-1])
+
+
 def in_scope(rel: str, cfg: dict) -> bool:
     """A code file of the project's own: not in renv/, .venv/, a hidden folder or the paper clone."""
-    return rel.endswith(CODE_SUFFIXES) and not rel.startswith(cfg["paper_dir"].rstrip("/") + "/") \
-        and not any(d in SKIP_DIRS or d.startswith(".") for d in rel.split("/")[:-1])
+    return rel.endswith(CODE_SUFFIXES) and own_path(rel, cfg)
+
+
+def r_file(rel: str) -> bool:
+    """A file renv reads for the packages it uses (R-kernel notebooks and shebang scripts aside)."""
+    name = rel.rsplit("/", 1)[-1]
+    return name == ".Rprofile" or name.lower().endswith(R_SUFFIXES)
 
 
 def code_files(project: Path, cfg: dict, library: list[str]) -> tuple[list[str], list[str]]:

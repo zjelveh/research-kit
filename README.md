@@ -156,9 +156,10 @@ Each entry has a comment line above it. Values are numbers, single-quoted string
 - numbers other than 0, 1, 2 and 100, dates, and paths or file names. A line that has to keep a value ends with `# literal: <reason>`, which `/kit:review` sees;
 - a new function or class defined in a pipeline script (a driver's `main` or `parse_args` aside). Functions belong in the library. The library, packages, explore scripts and the run-all script may define them, and a function a script already had may still be edited;
 - a `param()` name that neither parameter file has, an explore parameter read by pipeline code, or `param()` called in a package. A format problem in a parameter file blocks every commit until it is fixed;
-- a new library function that nearly copies another library function once local names and values are set aside, such as a pool loader with a cutoff of 30 beside the same loader with 20. One function with an argument does for both; a real difference ends the definition line with `# distinct: <reason>`.
+- a new library function that nearly copies another library function once local names and values are set aside, such as a pool loader with a cutoff of 30 beside the same loader with 20. One function with an argument does for both; a real difference ends the definition line with `# distinct: <reason>`;
+- in a project that uses R, archived R code (in an `archive/`, `_archive/`, `legacy/` or `retired/` folder) whose folder has no `.renvignore` with the line `*`. Without it, renv records the packages that only archived code uses in `renv.lock`, and a replicator's `renv::restore()` installs them.
 
-Tests, archived code (`archive/`, `legacy/`), `renv/` and hidden folders are exempt from these checks. `kit lint_code.py --project . --all` counts a project's existing findings by file.
+Tests, archived code (`archive/`, `legacy/`), `renv/` and hidden folders are exempt from the other checks. `kit lint_code.py --project . --all` counts a project's existing findings by file.
 
 **Projects made before these files.** Run `kit scaffold.py add-params` in the project. It adds the parameter files and readers the project lacks, ignores `analysis/explore/out/`, commits those files, and turns the code gate on. It refuses, and changes nothing, if the project has its own file of the same name. Existing code keeps committing: only new and edited lines are checked, and a function a script already had may still be edited.
 

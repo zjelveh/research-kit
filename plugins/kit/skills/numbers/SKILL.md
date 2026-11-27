@@ -53,7 +53,7 @@ A value that rounds to zero printed with a real minus (`$-$0.0`) is a warning, n
 
 ## When a commit is blocked
 
-In the code repo, the hook runs the code check first: a block that starts `code gate: N findings` is about typed values or functions defined in a pipeline script, and `/kit:code` says what to do. The numbers check follows. The pre-commit hook in each repo (paper: `paper/.lint_baseline`; code: `.lint_baseline_slides`) prints:
+In the code repo, the hook runs the code check first: a block that starts `code gate: N findings` is about the code (typed values, functions in pipeline scripts, near copies, parameters, or archived R code without its `.renvignore`), and `/kit:code` says what to do. The numbers check follows. The pre-commit hook in each repo (paper: `paper/.lint_baseline`; code: `.lint_baseline_slides`) prints:
 
 ```
 paper [index]: count=N baseline=B REGRESSION

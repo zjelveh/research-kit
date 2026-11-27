@@ -18,6 +18,9 @@ A new library function may not be a near copy of another library function (near_
 an argument does for both, unless its definition line ends in `# distinct: <reason>`.
 Also checks the parameter files' format, and that every param("name") exists and that pipeline code uses no
 explore parameter. A moved file counts only its changed lines; in a merge, only lines new to both parents.
+In a project whose languages include R, archived R code (in an archive, _archive, legacy or retired folder)
+needs a .renvignore with the line * in its outermost archive folder, so renv.lock leaves its packages out
+(the commit's R files, and with --all every archive folder).
 Exit: 0 nothing found (always, with --all), 1 findings, 2 config or project error.
 """
 from __future__ import annotations
@@ -27,6 +30,7 @@ import ast
 import os
 import posixpath
 import re
+import shlex
 import subprocess
 import sys
 from collections import Counter
@@ -37,9 +41,10 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kit_params  # noqa: E402
 import near_copy  # noqa: E402
-from code_scan import (CODE_SUFFIXES, DATE, ENTRY_POINTS, FILE_EXT, R_ASSIGN, R_DEF, R_STRING,  # noqa: E402
-                       classify, code_files, depth_change, git_names, in_scope, kits_reader, library_folders,
-                       lines_of, literals, parse_python, split_comment, top_level_definitions)
+from code_scan import (ARCHIVE_DIRS, CODE_SUFFIXES, DATE, ENTRY_POINTS, FILE_EXT, R_ASSIGN, R_DEF,  # noqa: E402
+                       R_STRING, classify, code_files, depth_change, git_names, in_scope, kits_reader,
+                       library_folders, lines_of, literals, own_path, parse_python, r_file, split_comment,
+                       top_level_definitions)
 from kitlib import CONFIG_REL, KitError, find_project, git, load_config  # noqa: E402
 
 ALLOWED_NUMBERS = {0, 1, 2, 100}
@@ -54,6 +59,8 @@ PARAM_CALL = re.compile(r"(?<![\w.])param(?:_path)?\(\s*[\"']([^\"']*)[\"']\s*\)
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", re.M)
 NEAR = " is a near copy of "
 FINDING = re.compile(r"(.*?):\d+: ")
+RENVIGNORE = ".renvignore"
+RENV = "renv would record its packages in renv.lock"
 
 
 def kind_of_string(s: str) -> str | None:
@@ -359,6 +366,78 @@ def staged_lines(project: Path) -> dict[str, tuple[set[int], set[str]]]:
     return {f: (lines, old_definitions(project, parents, old)) for f, (lines, old) in found.items()}
 
 
+def archive_folder(rel: str) -> str | None:
+    """The outermost archive folder among a file's parent folders, by name, or None."""
+    dirs = rel.split("/")[:-1]
+    for i, d in enumerate(dirs):
+        if d.lower() in ARCHIVE_DIRS:
+            return "/".join(dirs[:i + 1])
+    return None
+
+
+def r_archive_folders(files: list[str], cfg: dict) -> set[str]:
+    """The archive folders that hold these R files, in a project whose languages include R."""
+    if "r" not in cfg["languages"]:
+        return set()
+    return {a for f in files if r_file(f) and own_path(f, cfg) and (a := archive_folder(f))}
+
+
+def ignores_all(text: str) -> bool:
+    """A .renvignore line that leaves out the whole folder, read as renv reads it: lines split at \\n, \\r\\n or \\r,
+    and only trailing ASCII whitespace stripped."""
+    lines = text.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    return any(re.sub(r"[ \t\f\v]+$", "", line) in ("*", "/*") for line in lines)
+
+
+def renvignore_findings(texts: dict[str, str | None], on_disk: set[str] = frozenset(),
+                        odd: set[str] = frozenset()) -> list[str]:
+    """One finding for each archive folder whose .renvignore (its text, or None when it isn't there) doesn't
+    leave the folder out. on_disk: folders whose file exists but isn't in the commit; odd: folders whose
+    .renvignore is a link or a folder, not a file."""
+    out = []
+    for folder, text in sorted(texts.items()):
+        f = f"{folder}/{RENVIGNORE}"
+        q = shlex.quote(f)
+        if folder in odd:
+            out.append(f"{f}:1: is not a plain file, and {folder}/ holds R code; {RENV}. Replace it with a file "
+                       f"with the one line *, and stage it: git add -- {q}")
+        elif text is None and folder in on_disk:
+            out.append(f"{f}:1: not in the commit, and {folder}/ holds R code; {RENV}. Stage it: git add -- {q}")
+        elif text is None:
+            out.append(f"{f}:1: missing, and {folder}/ holds R code; {RENV}. Add it with the one line *: "
+                       f"printf '*\\n' > {q} && git add -- {q}")
+        elif not ignores_all(text):
+            out.append(f"{f}:1: has no line *, and {folder}/ holds R code; {RENV}. Add the line *")
+    return out
+
+
+def _staged_renvignores(project: Path, cfg: dict) -> list[str]:
+    """Archive folders the commit puts R code in, or whose .renvignore it changes, moves or deletes while R code
+    stays there."""
+    if "r" not in cfg["languages"]:
+        return []
+    entries = git_names(project, "diff", "--cached", "--name-status", "--no-renames", "-z")
+    changes = list(zip(entries[::2], entries[1::2]))
+    folders = r_archive_folders([f for status, f in changes if status != "D"], cfg)
+    for _, f in changes:
+        folder = f.rsplit("/", 1)[0] if "/" in f else ""
+        if f.endswith("/" + RENVIGNORE) and archive_folder(f) == folder and folder not in folders \
+                and r_archive_folders(git_names(project, "ls-files", "-z", "--", f":(literal){folder}/"), cfg):
+            folders.add(folder)
+    texts, on_disk, odd = {}, set(), set()
+    for folder in folders:
+        rel = f"{folder}/{RENVIGNORE}"
+        found = [e.split("\t", 1) for e in git_names(project, "ls-files", "-s", "-z", "--", f":(literal){rel}")]
+        entry = next((info.split() for info, path in found if path == rel), None)
+        texts[folder] = _git_text(project, "cat-file", "blob", entry[1]) \
+            if entry and entry[0] in ("100644", "100755") else None
+        if entry and entry[0] not in ("100644", "100755") or not entry and found:
+            odd.add(folder)
+        elif not entry and (project / rel).is_file():
+            on_disk.add(folder)
+    return renvignore_findings(texts, on_disk, odd)
+
+
 def precommit(project: Path) -> list[str]:
     cfg = load_config(project)
     library = library_folders(project, cfg)
@@ -384,7 +463,7 @@ def precommit(project: Path) -> list[str]:
                            {f: old for f, (_, old) in staged.items()},
                            library_texts(project, cfg, library_then(project, "HEAD", library), "HEAD")
                            if head else None)
-    return out
+    return out + _staged_renvignores(project, cfg)
 
 
 def changed(project: Path, files: list[str], base: str | None = "HEAD") -> list[str]:
@@ -436,11 +515,17 @@ def backlog(project: Path) -> str:
                                    classify(rel, library), None, pipe, expl, {})]
     texts = library_texts(project, cfg, library, None)
     found += near_copies(texts, {rel: None for rel in texts}, {})
+    listed = git_names(project, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+    renv = {a: (project / a / RENVIGNORE).read_text(encoding="utf-8", errors="replace")
+            if (project / a / RENVIGNORE).is_file() else None
+            for a in r_archive_folders([f for f in listed if (project / f).is_file()], cfg)}
+    found += renvignore_findings(renv)
     for line in found:
         per_file[FINDING.match(line).group(1)] += 1
         kinds[line.split(": typed ", 1)[1].split(" ")[0] if ": typed " in line else
               "function" if " in a pipeline script:" in line else
-              "near copy" if NEAR in line else "parameter use"] += 1
+              "near copy" if NEAR in line else
+              "renvignore" if RENV in line else "parameter use"] += 1
     head = (f"code gate backlog: {sum(per_file.values())} findings in "
             f"{len(per_file)} files ({', '.join(f'{k} {n}' for k, n in kinds.most_common()) or 'none'})")
     return "\n".join([head, *problems, *(f"{n:6d}  {f}" for f, n in per_file.most_common())])
@@ -490,6 +575,11 @@ def main(argv: list[str] | None = None) -> int:
             remedy += (" Merge each near copy into the function it copies, with an argument for what differs, and "
                        "call that; if the two give different results, ask which definition is right first. A real "
                        "difference ends the definition line with `# distinct: <reason>`.")
+        if any(RENV in f for f in found):
+            remedy += (" Give each archive folder its .renvignore, then run renv::snapshot() in R so renv.lock drops "
+                       "the packages only archived code used, and commit renv.lock with it (a commit of named paths "
+                       "names the .renvignore too). Until then renv::status() reports those packages as out of sync, "
+                       "and scaffold.py add-package refuses to run.")
         print(f"code gate: {len(found)} finding{'s' if len(found) != 1 else ''}.{remedy}", file=sys.stderr)
         return 1
     if not a.precommit:

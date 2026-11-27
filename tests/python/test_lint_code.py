@@ -99,6 +99,7 @@ def test_parameter_file_problems_block_the_commit(project, capsys):
 def test_tests_archive_and_tooling_are_exempt(project, capsys):
     stage(project, "analysis/tests/test_run.py", "assert f(3) == 0.25\n")
     stage(project, "analysis/archive/old.R", "x <- 2019\n")
+    stage(project, "analysis/archive/.renvignore", "*\n")
     stage(project, "renv/activate.R", "version <- '1.0.7'\nn <- 78\n")
     stage(project, ".claude/hooks/x.py", "n = 30\n")
     assert gate(project, capsys) == (0, "")
@@ -531,3 +532,200 @@ def test_a_form_feed_does_not_hide_a_new_pipeline_function(project, capsys):
     stage(project, "analysis/run2.R", "x <- 1\n\x0c\nhelper <- function(d) d\n")
     code, out = gate(project, capsys)
     assert code == 1 and "analysis/run2.R:3: defines helper() in a pipeline script" in out
+
+
+# Archived R code carries a .renvignore, so renv.lock leaves its packages out (spec 2026-11-27-renv-archive).
+
+def renv_findings(out):
+    return [line for line in out.splitlines() if ".renvignore:1: " in line]
+
+
+def test_archived_r_code_without_a_renvignore_blocks(project, capsys):
+    stage(project, "archive/x.R", "library(zoo)\n")
+    code, out = gate(project, capsys)
+    assert code == 1
+    assert renv_findings(out) == [
+        "archive/.renvignore:1: missing, and archive/ holds R code; renv would record its packages in renv.lock. "
+        "Add it with the one line *: printf '*\\n' > archive/.renvignore && git add -- archive/.renvignore"]
+
+
+def test_a_renvignore_staged_or_committed_passes(project, capsys):
+    stage(project, "archive/x.R", "library(zoo)\n")
+    stage(project, "archive/.renvignore", "# renv leaves archived code out\n*  \n")
+    assert gate(project, capsys) == (0, "")
+    git(project, "commit", "-q", "-m", "archive")
+    stage(project, "archive/y.R", "library(xts)\n")
+    assert gate(project, capsys) == (0, "")
+
+
+def test_a_renvignore_without_a_star_line_blocks(project, capsys):
+    stage(project, "archive/x.R", "library(zoo)\n")
+    stage(project, "archive/.renvignore", "old.R\n")
+    code, out = gate(project, capsys)
+    assert code == 1
+    assert renv_findings(out) == ["archive/.renvignore:1: has no line *, and archive/ holds R code; renv would "
+                                  "record its packages in renv.lock. Add the line *"]
+    stage(project, "archive/.renvignore", "/*\n")
+    assert gate(project, capsys) == (0, "")
+
+
+def test_one_finding_per_outermost_archive_folder(project, capsys):
+    stage(project, "archive/a.R", "library(zoo)\n")
+    stage(project, "archive/b.Rmd", "```{r}\nlibrary(xts)\n```\n")
+    stage(project, "archive/old/legacy/c.R", "library(sf)\n")
+    stage(project, "analysis/Legacy/d.qmd", "```{r}\nlibrary(sp)\n```\n")
+    stage(project, "analysis/retired/e.Rnw", "<<>>=\nlibrary(sp)\n@\n")
+    _, out = gate(project, capsys)
+    assert [line.split(":1: ")[0] for line in renv_findings(out)] == [
+        "analysis/Legacy/.renvignore", "analysis/retired/.renvignore", "archive/.renvignore"]
+
+
+def test_a_move_into_an_archive_folder_counts_and_a_deletion_does_not(project, capsys):
+    (project / "analysis" / "_archive").mkdir()
+    git(project, "mv", "analysis/run.R", "analysis/_archive/run.R")
+    _, out = gate(project, capsys)
+    assert [line.split(":1: ")[0] for line in renv_findings(out)] == ["analysis/_archive/.renvignore"]
+    git(project, "reset", "-q", "--hard")
+    stage(project, "archive/x.R", "library(zoo)\n")
+    stage(project, "archive/.renvignore", "*\n")
+    git(project, "commit", "-q", "-m", "archive")
+    git(project, "rm", "-q", "archive/.renvignore", "archive/x.R")
+    assert gate(project, capsys) == (0, "")
+
+
+def test_python_projects_tooling_and_other_files_are_not_checked(project, capsys):
+    stage(project, "renv/archive/x.R", "library(zoo)\n")
+    stage(project, ".hidden/archive/x.R", "library(zoo)\n")
+    stage(project, "archive/notes.md", "old notes\n")
+    stage(project, "archive/x.py", "import zoo\n")
+    assert gate(project, capsys) == (0, "")
+    cfg = project / ".claude" / "research.yml"
+    cfg.write_text(cfg.read_text().replace("languages: [r]", "languages: [python]"))
+    git(project, "add", ".claude/research.yml")
+    stage(project, "archive/x.R", "library(zoo)\n")
+    assert gate(project, capsys) == (0, "")
+
+
+def test_all_lists_archive_folders_without_a_renvignore(project, capsys):
+    write(project / "archive" / "x.R", "library(zoo)\n")
+    write(project / "archive" / "y.R", "library(xts)\n")
+    write(project / "analysis" / "legacy" / "z.Rmd", "```{r}\nlibrary(sf)\n```\n")
+    write(project / "analysis" / "legacy" / ".renvignore", "*\n")
+    assert lint_code.main(["--project", str(project), "--all"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("code gate backlog: 2 findings in 2 files (number 1, renvignore 1)")
+    assert "     1  archive/.renvignore" in out
+    assert lint_code.main(["--project", str(project), "--all", "archive/x.R"]) == 0
+    assert "code gate: nothing found" in capsys.readouterr().out
+
+
+def test_renv_reads_the_star_line_as_renv_does(project, capsys):
+    stage(project, "archive/x.R", "library(zoo)\n")
+    for text, blocks in [(" *\n", True), ("* # all\n", True), ("*  \r\n", False), ("\ufeff*", False),
+                         ("# renv\n/*\n", False)]:
+        stage(project, "archive/.renvignore", text)
+        assert (gate(project, capsys)[0] == 1) is blocks, text
+
+
+def test_all_the_file_types_renv_reads(project, capsys):
+    for name in ("a.RMD", "b.Rmarkdown", "c.QMD", "d.rnw", ".Rprofile"):
+        stage(project, f"archive/{name}", "library(zoo)\n")
+        _, out = gate(project, capsys)
+        assert [line.split(":1: ")[0] for line in renv_findings(out)] == ["archive/.renvignore"], name
+        git(project, "rm", "-q", "--cached", f"archive/{name}")
+    stage(project, "legacy/x.py", "import zoo\n")
+    stage(project, "docs/x.R", "library(zoo)\n")
+    assert gate(project, capsys) == (0, "")
+
+
+def test_a_renvignore_on_disk_but_not_staged_is_named(project, capsys):
+    stage(project, "archive/x.R", "library(zoo)\n")
+    write(project / "archive" / ".renvignore", "*\n")
+    _, out = gate(project, capsys)
+    assert renv_findings(out) == ["archive/.renvignore:1: not in the commit, and archive/ holds R code; renv would "
+                                  "record its packages in renv.lock. Stage it: git add -- archive/.renvignore"]
+
+
+def test_a_folder_name_with_a_space_is_quoted(project, capsys):
+    stage(project, "old code/archive/x.R", "library(zoo)\n")
+    _, out = gate(project, capsys)
+    assert "printf '*\\n' > 'old code/archive/.renvignore' && git add -- 'old code/archive/.renvignore'" in out
+
+
+def test_the_remedy_says_to_snapshot_and_the_count_includes_the_finding(project, capsys):
+    stage(project, "archive/x.R", "library(zoo)\n")
+    stage(project, "analysis/run2.R", "n <- 30\n")
+    code = lint_code.main(["--project", str(project), "--precommit"])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.err.startswith("code gate: 2 findings.")
+    assert "renv::snapshot()" in captured.err
+
+
+def test_deleting_or_breaking_the_renvignore_while_r_code_stays_blocks(project, capsys):
+    stage(project, "archive/x.R", "library(zoo)\n")
+    stage(project, "archive/.renvignore", "*\n")
+    git(project, "commit", "-q", "-m", "archive")
+    git(project, "rm", "-q", "archive/.renvignore")
+    assert renv_findings(gate(project, capsys)[1])[0].startswith("archive/.renvignore:1: missing")
+    git(project, "reset", "-q", "--hard")
+    stage(project, "archive/.renvignore", "old.R\n")
+    assert renv_findings(gate(project, capsys)[1])[0].startswith("archive/.renvignore:1: has no line *")
+
+
+def test_a_merge_that_brings_archived_r_code_blocks(project, capsys):
+    git(project, "checkout", "-q", "-b", "side")
+    stage(project, "archive/x.R", "library(zoo)\n")
+    git(project, "commit", "-q", "--no-verify", "-m", "side")
+    git(project, "checkout", "-q", "main")
+    stage(project, "notes.txt", "x\n")
+    git(project, "commit", "-q", "-m", "main")
+    git(project, "merge", "-q", "--no-commit", "--no-ff", "side")
+    assert [line.split(":1: ")[0] for line in renv_findings(gate(project, capsys)[1])] == ["archive/.renvignore"]
+
+
+def test_all_reads_untracked_files_and_skips_ignored_ones(project, capsys):
+    write(project / ".gitignore", "scratch/\n")
+    write(project / "scratch" / "archive" / "x.R", "library(zoo)\n")
+    write(project / "legacy" / "y.R", "library(zoo)\n")
+    write(project / "retired" / "z.R", "library(zoo)\n")
+    write(project / "retired" / ".renvignore", "old.R\n")
+    assert lint_code.main(["--project", str(project), "--all"]) == 0
+    out = capsys.readouterr().out
+    assert "renvignore 2" in out and "legacy/.renvignore" in out and "retired/.renvignore" in out
+    assert "scratch" not in out
+
+
+def test_whitespace_renv_does_not_strip_still_blocks(project, capsys):
+    stage(project, "archive/x.R", "library(zoo)\n")
+    for text, blocks in [("* \n", True), ("#\x0c*\n", True), ("#\r*", False)]:
+        stage(project, "archive/.renvignore", text)
+        assert (gate(project, capsys)[0] == 1) is blocks, repr(text)
+
+
+def test_moving_the_renvignore_away_blocks(project, capsys):
+    stage(project, "archive/x.R", "library(zoo)\n")
+    stage(project, "archive/.renvignore", "*\n")
+    git(project, "commit", "-q", "-m", "archive")
+    git(project, "mv", "archive/.renvignore", "archive/renvignore.bak")
+    assert renv_findings(gate(project, capsys)[1])[0].startswith("archive/.renvignore:1: missing")
+
+
+def test_a_renvignore_that_is_a_folder_or_a_link_is_named(project, capsys):
+    stage(project, "archive/x.R", "library(zoo)\n")
+    stage(project, "archive/.renvignore/inner.txt", "*\n")
+    assert renv_findings(gate(project, capsys)[1])[0].startswith("archive/.renvignore:1: is not a plain file")
+    git(project, "rm", "-q", "-r", "--cached", "archive/.renvignore")
+    write(project / "keep.txt", "*\n")
+    (project / "legacy").mkdir()
+    (project / "legacy" / ".renvignore").symlink_to("../keep.txt")
+    stage(project, "legacy/y.R", "library(zoo)\n")
+    git(project, "add", "legacy/.renvignore")
+    assert any(line.startswith("legacy/.renvignore:1: is not a plain file")
+               for line in renv_findings(gate(project, capsys)[1]))
+
+
+def test_a_folder_that_looks_like_an_index_stage_is_read(project, capsys):
+    stage(project, "0:old/archive/x.R", "library(zoo)\n")
+    stage(project, "0:old/archive/.renvignore", "*\n")
+    assert gate(project, capsys) == (0, "")
