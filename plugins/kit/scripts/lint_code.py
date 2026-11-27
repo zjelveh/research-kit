@@ -39,8 +39,10 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import frozen  # noqa: E402
 import kit_params  # noqa: E402
 import near_copy  # noqa: E402
+import pipeline  # noqa: E402
 from code_scan import (ARCHIVE_DIRS, CODE_SUFFIXES, DATE, ENTRY_POINTS, FILE_EXT, R_ASSIGN, R_DEF,  # noqa: E402
                        R_STRING, classify, code_files, depth_change, git_names, in_scope, kits_reader,
                        library_folders, lines_of, literals, own_path, parse_python, r_file, split_comment,
@@ -61,6 +63,7 @@ NEAR = " is a near copy of "
 FINDING = re.compile(r"(.*?):\d+: ")
 RENVIGNORE = ".renvignore"
 RENV = "renv would record its packages in renv.lock"
+LEAVES = " leaves while "
 
 
 def kind_of_string(s: str) -> str | None:
@@ -182,9 +185,10 @@ def param_calls(rel: str, text: str) -> list[tuple[int, str]]:
 
 
 def lint_text(rel: str, text: str, cls: str, lines: set[int] | None, pipe: dict, expl: dict,
-              hints: dict, old_defs: set[str] = frozenset()) -> list[str]:
+              hints: dict, old_defs: set[str] = frozenset(), listed_run_all: bool = False) -> list[str]:
     """Findings, as `file:line: message`, for the given lines of one code file (all when lines is None).
-    A function the file already defined before (old_defs) may be edited."""
+    A function the file already defined before (old_defs) may be edited. listed_run_all: research.yml's
+    run_all: names this file."""
     if cls in ("test", "archive"):
         return []
     package = rel.startswith("pkg/")
@@ -209,7 +213,7 @@ def lint_text(rel: str, text: str, cls: str, lines: set[int] | None, pipe: dict,
             elif name not in pipe and cls != "explore":
                 out.append(f"{rel}:{n}: param('{name}') is an explore parameter; pipeline code uses "
                            f"{kit_params.PIPELINE} only")
-    run_all = Path(rel).stem == "run_all"           # the run-all script may keep a small step-runner
+    run_all = listed_run_all or Path(rel).stem == "run_all"   # the run-all script may keep a small step-runner
     if cls == "pipeline" and not package and not run_all and not kits_reader(rel, text):
         out += [f"{rel}:{n}: defines {name}() in a pipeline script: the paper's code goes in the library, and the "
                 "script calls it" for n, name in top_level_definitions(rel, text)
@@ -454,7 +458,8 @@ def precommit(project: Path) -> list[str]:
     for f, (lines, old) in sorted(staged.items()):
         cls = classify(f, library)
         if lines and in_scope(f, cfg) and cls not in ("test", "archive"):
-            out += lint_text(f, _git_text(project, "show", f":{f}"), cls, lines, pipe, expl, hints, old)
+            out += lint_text(f, _git_text(project, "show", f":{f}"), cls, lines, pipe, expl, hints, old,
+                             f in cfg.get("run_all", []))
     new = {f: lines for f, (lines, _) in staged.items()
            if lines and in_scope(f, cfg) and classify(f, library) == "library"}
     if new:
@@ -463,7 +468,98 @@ def precommit(project: Path) -> list[str]:
                            {f: old for f, (_, old) in staged.items()},
                            library_texts(project, cfg, library_then(project, "HEAD", library), "HEAD")
                            if head else None)
-    return out + _staged_renvignores(project, cfg)
+    params = {n: v for n, (v, *_) in {**pipe, **expl}.items() if isinstance(v, str)}
+    return out + _staged_renvignores(project, cfg) + _leaving(project, cfg, library, params)
+
+
+def _index_texts(project: Path, wanted: set[str]) -> dict[str, str]:
+    """The index's text of these files (regular files at stage 0), read with one git cat-file --batch."""
+    shas = {}
+    for entry in git_names(project, "ls-files", "-s", "-z"):
+        info, path = entry.split("\t", 1)
+        mode, sha, stage = info.split()
+        if path in wanted and stage == "0" and mode in ("100644", "100755"):
+            shas[path] = sha
+    if not shas:
+        return {}
+    paths = sorted(shas)
+    proc = subprocess.run(["git", "-C", str(project), "cat-file", "--batch"], capture_output=True,
+                          input=("\n".join(shas[p] for p in paths) + "\n").encode())
+    if proc.returncode != 0:
+        raise KitError(f"git cat-file --batch failed in {project}: {proc.stderr.decode('utf-8', 'replace')}")
+    out, data, pos = {}, proc.stdout, 0
+    for path in paths:
+        end = data.index(b"\n", pos)
+        size = int(data[pos:end].split()[2])
+        out[path] = data[end + 1:end + 1 + size].decode("utf-8", errors="replace")
+        pos = end + 1 + size + 1
+    return out
+
+
+def _leaving_scripts(project: Path, cfg: dict, library: list[str]) -> dict[str, str]:
+    """The R and Python scripts the commit deletes, or moves into archived code or out of the code, mapped to
+    where they are now. A move git pairs as a rename (any edit under its 50% threshold) to another code file is
+    not a leave."""
+    entries = git_names(project, "diff", "--cached", "--raw", "-M", "--no-abbrev", "-z")
+    out, i = {}, 0
+    while i < len(entries):
+        status = entries[i].split()[4]
+        if status[0] in "RC":
+            old, new, i = entries[i + 1], entries[i + 2], i + 3
+        else:
+            old, new, i = entries[i + 1], None, i + 2
+        if status[0] not in "RD" or not old.endswith((".R", ".r", ".py")) or not own_path(old, cfg) \
+                or classify(old, library) in ("archive", "test", "explore"):
+            continue
+        if new and new.endswith((".R", ".r", ".py")) and own_path(new, cfg) \
+                and classify(new, library) != "archive":
+            continue                                # still code, somewhere else
+        out[old] = new or old
+    return out
+
+
+def _leaving(project: Path, cfg: dict, library: list[str], params: dict[str, str]) -> list[str]:
+    """A script the commit deletes or archives may not leave while the pipeline still reads a file it writes
+    that nothing left in the pipeline writes and frozen.yml doesn't declare (frozen results spec)."""
+    leaving = _leaving_scripts(project, cfg, library)
+    if not leaving:
+        return []
+    files = pipeline.code_files(git_names(project, "ls-files", "-z"), cfg)
+    starts = pipeline.run_alls(cfg, files, library)
+    if starts is None:
+        return []
+    frozen_text = _index_texts(project, {frozen.FROZEN}).get(frozen.FROZEN)
+    try:
+        frozen_paths = [e["path"] for e in frozen.parse(frozen_text)]
+    except KitError as e:
+        return [f"{frozen.FROZEN}:1: {e}"]
+    root = str(project.resolve())
+    texts = _index_texts(project, set(files) - set(leaving))
+    g = pipeline.graph(texts, starts, library, params, [pipeline.NUMBERS[lang] for lang in cfg["languages"]],
+                       root, only_run=True)
+    readers = pipeline.readers_of(g)
+    out = []
+    for script, now in sorted(leaving.items()):
+        head = _git_text(project, "show", f"HEAD:{script}", check=False)
+        seen = set()
+        for name in sorted(pipeline.uses(script, head, params, root).writes):
+            file = pipeline.resolve(project, script, name)
+            known = (project / file).is_file()
+            if file in seen or any(fz == file if known else pipeline.same(name, fz) for fz in frozen_paths):
+                continue
+            hits = sorted((sorted(ats)[0], rname) for rname, ats in readers.items() if pipeline.same(name, rname)
+                          and not pipeline.made_by_pipeline(g, rname))
+            if not hits:
+                continue
+            seen.add(file)
+            (reader, line), rname = hits[0]
+            out.append(f"{script}:1:{LEAVES}{reader}:{line} reads {rname}, which nothing left in the pipeline "
+                       f"writes; keep the script, move the writing into the pipeline, or declare the file "
+                       f"frozen: kit frozen.py add {shlex.quote(file)} --made-by {shlex.quote(now)} "
+                       f"--why \"<reason>\"")
+    return out
+
+
 
 
 def changed(project: Path, files: list[str], base: str | None = "HEAD") -> list[str]:
@@ -495,7 +591,7 @@ def changed(project: Path, files: list[str], base: str | None = "HEAD") -> list[
             lines, before = changes(project, [base], {rel}).get(rel, (set(), rel))
             old = old_definitions(project, [base], before)
         out += lint_text(rel, p.read_text(encoding="utf-8", errors="replace"), classify(rel, library), lines,
-                         pipe, expl, hints, old)
+                         pipe, expl, hints, old, rel in cfg.get("run_all", []))
         if classify(rel, library) == "library" and lines != set():
             new[rel], olds[rel] = lines, old
     if new:
@@ -512,7 +608,8 @@ def backlog(project: Path) -> str:
     per_file, kinds = Counter(), Counter()
     found = [line for rel in code_files(project, cfg, library)[0]
              for line in lint_text(rel, (project / rel).read_text(encoding="utf-8", errors="replace"),
-                                   classify(rel, library), None, pipe, expl, {})]
+                                   classify(rel, library), None, pipe, expl, {}, frozenset(),
+                                   rel in cfg.get("run_all", []))]
     texts = library_texts(project, cfg, library, None)
     found += near_copies(texts, {rel: None for rel in texts}, {})
     listed = git_names(project, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
@@ -575,6 +672,10 @@ def main(argv: list[str] | None = None) -> int:
             remedy += (" Merge each near copy into the function it copies, with an argument for what differs, and "
                        "call that; if the two give different results, ask which definition is right first. A real "
                        "difference ends the definition line with `# distinct: <reason>`.")
+        if any(LEAVES in f for f in found):
+            remedy += (" A script that makes a file the pipeline still reads can't leave until the pipeline makes it "
+                       "or the file is declared frozen (with the user's approval: its inputs or its run can't be "
+                       "repeated); if neither fits, stop and ask.")
         if any(RENV in f for f in found):
             remedy += (" Give each archive folder its .renvignore, then run renv::snapshot() in R so renv.lock drops "
                        "the packages only archived code used, and commit renv.lock with it (a commit of named paths "

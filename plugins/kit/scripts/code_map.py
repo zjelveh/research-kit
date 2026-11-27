@@ -22,11 +22,13 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import frozen  # noqa: E402
 import kit_params  # noqa: E402
 import lint_code  # noqa: E402
 import near_copy  # noqa: E402
+import pipeline  # noqa: E402
 from code_scan import (CODE_SUFFIXES, ENTRY_POINTS, classify, code_files, kits_reader, library_folders,  # noqa: E402
-                       lines_of, literals, parse_python, py_functions, r_functions, split_comment)
+                       git_names, lines_of, literals, parse_python, py_functions, r_functions, split_comment)
 from kitlib import CONFIG_REL, KitError, find_project, load_config, paper_folders  # noqa: E402
 
 REPEAT_LINES = 6
@@ -208,7 +210,40 @@ def build(project: Path, near: str | None = None) -> dict:
             "name_repeats": name_repeats, "blocks": blocks, "archive_repeats": archive_repeats,
             "bodies": bodies, "core": core, "near": None if groups is None else sorted(groups, key=lambda g: (
                 not any(classes[b.file] == "library" for b in g), -len(g), min((b.file, b.line) for b in g))),
-            "writers": output_writers(project, cfg, lits, params, users), "reads": reads, "unparsed": unparsed}
+            "writers": output_writers(project, cfg, lits, params, users), "reads": reads, "unparsed": unparsed,
+            "pipeline": pipeline_report(project, cfg, library, {n: v for n, (v, *_) in params.items()
+                                                                 if isinstance(v, str)})}
+
+
+def pipeline_report(project: Path, cfg: dict, library: list[str], params: dict[str, str]) -> dict:
+    """What the pipeline runs, the files it reads but doesn't make, and the frozen entries to check."""
+    names = [f for f in git_names(project, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+             if (project / f).is_file()]
+    files = pipeline.code_files(names, cfg)
+    out = {"run": None, "unmade": [], "paper": [], "missing": [f for f in cfg.get("run_all", [])
+                                                                if not (project / f).is_file()],
+           "frozen": None if not (project / frozen.FROZEN).is_file() else 0, "frozen_problems": [],
+           "frozen_error": None}
+    try:
+        entries = frozen.load(project)
+        out["frozen_problems"] = frozen.problems(project, entries)
+        if out["frozen"] is not None:
+            out["frozen"] = len(entries)
+    except KitError as e:
+        entries, out["frozen_error"] = [], str(e)
+    starts = pipeline.run_alls(cfg, files, library)
+    if starts is None:
+        return out
+    texts = {f: (project / f).read_text(encoding="utf-8", errors="replace") for f in files}
+    g = pipeline.graph(texts, starts, library, params, [pipeline.NUMBERS[lang] for lang in cfg["languages"]],
+                       str(project.resolve()))
+    out["run"] = len(g.run)
+    out["unmade"] = pipeline.unmade(g, [e["path"] for e in entries])
+    for x in out["unmade"]:                      # show the file as a path from the project root, when it exists
+        x.name = next((r for f, _ in x.writers if (project / (r := pipeline.resolve(project, f, x.name))).is_file()),
+                      x.name)
+    out["paper"] = pipeline.paper_unmade(project, cfg, texts, g)
+    return out
 
 
 def _n(count: int, word: str) -> str:
@@ -231,11 +266,21 @@ def summary(m: dict) -> list[str]:
              *([] if m["near"] is None else [f"{_n(len(m['near']), 'group')} of near copies"]),
              "paper not attached" if writers is None else f"{_n(len(writers), 'output')} with several writers",
              f"{_n(len(m['reads']), 'direct read')} of library data"]
+    pl = m["pipeline"]
+    parts.append("pipeline: no run-all script (run_all.R, run_all.py, or run_all: in research.yml)"
+                 if pl["run"] is None else
+                 f"pipeline: {_n(pl['run'], 'file')} run, {_n(len(pl['unmade']) + len(pl['paper']), 'file')} "
+                 "read but not made")
+    if pl["frozen"] is not None:
+        parts.append(f"frozen: {pl['frozen']} declared, {len(pl['frozen_problems'])} to check")
     lines = [f"code map: {', '.join(parts)}; library: {', '.join(m['library']) or 'none'}"]
     if m["ignored"]:
         lines.append(f"warning: git ignores {_n(len(m['ignored']), 'library code file')}: "
                      f"{', '.join(m['ignored'][:5])}{' ...' if len(m['ignored']) > 5 else ''}")
     lines += [f"warning: {p}" for p in m["param_problems"] + m["foreign"]]
+    lines += [f"warning: run_all entry {f} does not exist" for f in m["pipeline"]["missing"]]
+    if m["pipeline"]["frozen_error"]:
+        lines.append(f"warning: {m['pipeline']['frozen_error']}")
     if m["unparsed"]:
         lines.append(f"note: {_n(len(m['unparsed']), 'Python file')} could not be parsed: "
                      f"{', '.join(m['unparsed'][:5])}{' ...' if len(m['unparsed']) > 5 else ''}")
@@ -269,6 +314,8 @@ def report(m: dict, mode: str = "map", only: set[str] | None = None, typed: list
             used = sorted(m["users"].get(name, ()))
             out.append(f"{name} = {_shown(value)}  {where}:{line}  used in {len(used)}"
                        f"{': ' + ', '.join(used[:3]) + (' ...' if len(used) > 3 else '') if used else ''}  {about}")
+    if mode in ("map", "all"):
+        out += pipeline_section(m["pipeline"])
     if mode == "map":
         out += ["", "Run with --files <changed files> to check new code, or --all for every list."]
         return "\n".join(out)
@@ -300,6 +347,23 @@ def report(m: dict, mode: str = "map", only: set[str] | None = None, typed: list
     out += ["", "## Direct reads of the library's data (load it through a library function instead)"]
     out += [f"{f}:{n}  reads {', '.join(names)}" for f, n, names in m["reads"] if keep([f])]
     return "\n".join(out)
+
+
+def pipeline_section(pl: dict) -> list[str]:
+    out = ["", "## Files the pipeline reads but doesn't make (declare a result kept on purpose with frozen.py add)"]
+    if pl["run"] is None:
+        out.append("no run-all script: name the scripts that run the pipeline in research.yml's run_all key")
+    at = lambda ws: ", ".join("the paper" if f == "paper" else f"{f}:{n}" for f, n in ws)  # noqa: E731
+    for x in pl["unmade"]:
+        out.append(f"{x.name}  read by {at(x.readers)}; written only by {at(x.writers)}")
+    for x in pl["paper"]:
+        out.append(f"{x.name}  used by the paper; " + (f"named only outside the pipeline, by {at(x.writers)}"
+                                                       if x.writers else "no script names it"))
+    if pl["run"] is not None and not pl["unmade"] and not pl["paper"]:
+        out.append("none")
+    out += [f"run_all entry {f} does not exist" for f in pl["missing"]]
+    out += [f"to check: {p}" for p in pl["frozen_problems"]]
+    return out
 
 
 def relative_files(project: Path, files: list[str]) -> set[str]:

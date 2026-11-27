@@ -113,6 +113,9 @@ These are rare edge cases that have been accepted rather than fixed. The bar for
 - **Strings with a slash and no spaces** count as paths, so a label like `"Black/White"` is flagged. A URL is flagged on purpose: it is a data location.
 - **Command-line functions** (click or typer commands) in a pipeline script are blocked; they belong in the library, with the script calling them.
 - **An archive folder that a parent `.renvignore` already leaves out** still needs its own `.renvignore`: the check reads only the archive folder's file.
+- **A script moved with heavy edits** (under git's 50% rename similarity) counts as leaving for the archive check, as it counts as new for the other rules: move it first, then edit it.
+- **Merges and the archive check:** a merge that stops (conflicts, `--no-commit`) is checked against HEAD only, so merging a branch that adds a reader into a branch that archived the writer isn't caught; merging the other way is.
+- **A script blocked from leaving by a wrong match:** the text check can think the pipeline reads a file only the leaving script writes when a basename is shared by two folders, or when the pipeline's real writer names the file in a way the check can't see. There is no comment escape: keep the script, or stop and ask.
 - **A file moved with heavy edits** (under git's 50% similarity) counts as new, so its old functions and typed values are flagged too.
 
 ### Behaviour notes
@@ -126,6 +129,9 @@ These are rare edge cases that have been accepted rather than fixed. The bar for
 - Caller counts, parameter users and paper-output writers are found by text, not by running code. A name built at run time is missed.
 - Repeats are blocks of six or more lines after spacing and comments are dropped. A copy with a renamed variable doesn't count as a repeat.
 - A direct read of library data is reported only for data that a library loader reads, through `param()` or as an argument.
+- **What the pipeline runs and makes** is found by text. Missed or wrong when: a file name is built at run time beyond the template forms (`%s`, `{x}`); a variable holds a path through more than one step, or across files; a project names files through its own configuration reader, so a pipeline script seems to write nothing (a parameter named in a string, and a name passed to any call, count as writes for the pipeline's own scripts, which keeps wrong findings down); a basename is shared by two folders (`es.csv` matches `a/es.csv` and `b/es.csv`); a reader or writer the lists don't name; a script run in a way the following rules don't see (a Makefile's pattern rules, a loop over `list.files()`, a bare name under four characters, a name with spaces). Also missed: names joined at run time (`paste0(dir, "/es.csv")`, `OUT + "/es.csv"`), tuple assignments, loops over a literal list of paths, and statements after a triple-quoted string with an unbalanced `(` (up to 30 lines).
+- **The paper's tables and figures** count as used only when a `.tex` file of the manuscript names their stem; they take no part in the commit block.
+- **A pipeline script whose name ends in `_test.py`** (`run_x_test.py`) is classed as a test, pytest's convention, so the code gate's rules skip it. The pipeline check still counts it as a writer.
 
 ## Near copies (`near_copy.py`)
 

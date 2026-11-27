@@ -216,6 +216,21 @@ def test_library_key_is_optional_and_a_list_of_strings(tmp_path):
             load_config(minimal_project(tmp_path / f"d{len(bad)}", CONFIG + bad))
 
 
+def test_run_all_key_is_optional_and_a_list_of_strings(tmp_path):
+    assert "run_all" not in load_config(minimal_project(tmp_path / "a"))
+    cfg = load_config(minimal_project(tmp_path / "b", CONFIG + "run_all: [code/run_cascade.sh]\n"))
+    assert cfg["run_all"] == ["code/run_cascade.sh"]
+    assert load_config(minimal_project(tmp_path / "c", CONFIG + "run_all: []\n"))["run_all"] == []
+    for bad in ("run_all: run.sh\n", "run_all: [run.sh, 3]\n", "run_all: ['']\n"):
+        with pytest.raises(KitError, match="'run_all' must be a list"):
+            load_config(minimal_project(tmp_path / f"d{len(bad)}", CONFIG + bad))
+    assert load_config(minimal_project(tmp_path / "e", CONFIG + "run_all: ['./Makefile ', a//b.sh]\n"))[
+        "run_all"] == ["Makefile", "a/b.sh"]
+    for bad in ("run_all: [/abs/run.sh]\n", "run_all: [../run.sh]\n"):
+        with pytest.raises(KitError, match="paths inside the project"):
+            load_config(minimal_project(tmp_path / f"f{len(bad)}", CONFIG + bad))
+
+
 def test_paper_folders_lives_in_kitlib(tmp_path):
     from kitlib import paper_folders
     p = minimal_project(tmp_path)

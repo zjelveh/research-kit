@@ -8,7 +8,7 @@ import re
 import subprocess
 import time
 import types
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -127,6 +127,15 @@ def load_config(project: Path) -> dict:
         lib = data["library"]
         if not isinstance(lib, list) or not all(isinstance(f, str) and f.strip() for f in lib):
             raise KitError(f"{path}: 'library' must be a list of folders or files (strings), got {lib!r}")
+    if "run_all" in data:
+        ra = data["run_all"]
+        if not isinstance(ra, list) or not all(isinstance(f, str) and f.strip() for f in ra):
+            raise KitError(f"{path}: 'run_all' must be a list of the scripts that run the pipeline (strings), "
+                           f"got {ra!r}")
+        norm = [PurePosixPath(f.strip()).as_posix() for f in ra]
+        if any(f.startswith("/") or ".." in PurePosixPath(f).parts for f in norm):
+            raise KitError(f"{path}: 'run_all' entries are paths inside the project, from its root, got {ra!r}")
+        data["run_all"] = norm
     _check_languages(path, data)
     return data
 

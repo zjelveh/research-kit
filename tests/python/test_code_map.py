@@ -394,3 +394,49 @@ def test_near_copies_are_listed_for_changed_files_and_grouped_in_all(project, ca
         "pool() analysis/R/pool.R:1, fig_pool() analysis/figure.R:1, pool_for_table() analysis/tables.R:1",
         "fmt() analysis/run_a.R:2, fmt() analysis/run_b.R:2"]
     assert "Near copies" not in out_of(capsys, project)                  # the plain map stays short
+
+
+# The pipeline section (frozen results spec).
+
+def pipeline_project(tmp_path, extra=""):
+    p = minimal_project(tmp_path, CONFIG.replace("languages: [r]", "languages: [python]") + extra)
+    write(p / "run_all.py", 'import subprocess\nsubprocess.run(["python", "analysis/make_fig.py"])\n')
+    write(p / "analysis" / "make_fig.py", 'CSV = "out/es.csv"\nes = pd.read_csv(CSV)\n')
+    write(p / "analysis" / "freeze_es.py", 'es.to_csv("out/es.csv")\n')
+    write(p / "out" / "es.csv", "a\n1\n")
+    write(p / ".gitignore", "out/\n")
+    git(p, "init", "-q", "-b", "main")
+    git(p, "add", "-A")
+    git(p, "commit", "-q", "-m", "init")
+    return p
+
+
+def test_the_map_lists_files_the_pipeline_reads_but_doesnt_make(tmp_path, capsys):
+    import frozen
+    p = pipeline_project(tmp_path)
+    assert code_map.main(["--project", str(p)]) == 0
+    out = capsys.readouterr().out
+    assert "pipeline: 2 files run, 1 file read but not made" in out.splitlines()[0]
+    assert "out/es.csv  read by analysis/make_fig.py:2; written only by analysis/freeze_es.py:1" in out
+    frozen.main(["add", "out/es.csv", "--made-by", "analysis/freeze_es.py", "--why", "kept", "--project", str(p)])
+    capsys.readouterr()
+    code_map.main(["--project", str(p)])
+    out = capsys.readouterr().out
+    assert "0 files read but not made, frozen: 1 declared, 1 to check" in out.splitlines()[0]
+    assert "to check: out/es.csv: frozen, but git doesn't track it" in out
+    write(p / "out" / "es.csv", "a\n2\n")
+    code_map.main(["--project", str(p)])
+    assert "to check: out/es.csv: frozen, but the file has changed" in capsys.readouterr().out
+
+
+def test_the_map_says_when_there_is_no_run_all_and_warns_about_missing_entries(tmp_path, capsys):
+    p = pipeline_project(tmp_path, "run_all: [cascade.sh, run_all.py]\n")
+    (p / "run_all.py").rename(p / "elsewhere.py")
+    code_map.main(["--project", str(p)])
+    out = capsys.readouterr().out
+    assert "warning: run_all entry run_all.py does not exist" in out
+    q = pipeline_project(tmp_path / "q", "run_all: []\n")
+    code_map.main(["--project", str(q)])
+    out = capsys.readouterr().out
+    assert "pipeline: no run-all script (run_all.R, run_all.py, or run_all: in research.yml)" in out
+    assert "no run-all script: name the scripts that run the pipeline" in out

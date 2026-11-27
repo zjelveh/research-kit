@@ -99,10 +99,11 @@ Later, `kit scaffold.py add-language r|python` adds a language to the project, `
 
 ```
 my-paper/
-├── .claude/research.yml      languages, paper folder, venue, and optionally the library
+├── .claude/research.yml      languages, paper folder, venue, and optionally the library and the run-all scripts
 ├── CLAUDE.md                 rules for this project only
 ├── analysis/                 code
 │   ├── params.yml            every number, date and path the code uses
+│   ├── frozen.yml            results kept on purpose that the pipeline reads but doesn't remake, if any
 │   ├── params.R, params.py   the readers that give code param("name"), one per language
 │   ├── explore/              dated scripts for quick questions, with their own params.yml
 │   ├── numbers/              make_numbers.R or .py, which write the paper's numbers
@@ -139,6 +140,8 @@ my-paper/
 
 **The library.** The library is the paper's code as it will be released: every step that produces a result in the paper (data preparation, samples, estimation, the computations behind each number, the tables and the figures) is a function there. It is the project's package under `pkg/`, or the folders and files named in `library:` in `.claude/research.yml`, such as `library: [analysis/R]`. An R library folder is loaded by one file: `kit scaffold.py add-loader analysis/R` writes and commits `analysis/R/load.R`, which sources every `.R` file in the folder except tests, so a script starts with `source("analysis/params.R")` and `source("analysis/R/load.R")`. Pipeline scripts are thin drivers that read parameters, call the library in order and write outputs, and a run-all script runs them, so a replicator runs one command. The `make_numbers` scripts are drivers too: they read values from committed results, and anything they compute comes from a library function. A request calls the library; a library function that nearly fits is extended; a genuine one-off goes in an explore script that calls the library. `kit code_map.py --project .` prints the library's functions, with how many files call each one, and the parameters, with the scripts that use them. `--files <files>` checks changed files for typed values, repeated code, near copies of functions, paper outputs with several writers and data read around the library; `--all` lists everything, for a clean-up.
 
+**What the pipeline makes.** The map also works out, from the code's text, which scripts the pipeline runs (from the run-all script, `run_all.R` or `run_all.py`, or the scripts named in `run_all:` in `.claude/research.yml`, following the scripts they call) and which script reads and writes each data file. It lists the files the pipeline reads that only scripts outside it write, such as a result made once by a script that was never added to the run-all, and the paper's tables and figures that no pipeline script names. A result kept on purpose, because its inputs or its run can't be repeated, is declared in `analysis/frozen.yml` with `kit frozen.py add <file> --made-by <script> --why "<reason>"`, which records the file's SHA-256; the map then lists it only if it goes missing, changes, or isn't tracked by git.
+
 **The parameter files.** `analysis/params.yml` holds what the pipeline uses, and a change to one of its values needs your approval. `analysis/explore/params.yml` holds the one-off values of quick questions. The format is a small subset of YAML that R and Python read without packages:
 
 ```yaml
@@ -157,6 +160,7 @@ Each entry has a comment line above it. Values are numbers, single-quoted string
 - a new function or class defined in a pipeline script (a driver's `main` or `parse_args` aside). Functions belong in the library. The library, packages, explore scripts and the run-all script may define them, and a function a script already had may still be edited;
 - a `param()` name that neither parameter file has, an explore parameter read by pipeline code, or `param()` called in a package. A format problem in a parameter file blocks every commit until it is fixed;
 - a new library function that nearly copies another library function once local names and values are set aside, such as a pool loader with a cutoff of 30 beside the same loader with 20. One function with an argument does for both; a real difference ends the definition line with `# distinct: <reason>`;
+- deleting a script, or moving it into an archive folder, while a script the pipeline runs still reads a file that only the leaving script writes, unless that file is declared in `analysis/frozen.yml`. The finding prints the `frozen.py add` command for the case where the file is kept on purpose;
 - in a project that uses R, archived R code (in an `archive/`, `_archive/`, `legacy/` or `retired/` folder) whose folder has no `.renvignore` with the line `*`. Without it, renv records the packages that only archived code uses in `renv.lock`, and a replicator's `renv::restore()` installs them.
 
 Tests, archived code (`archive/`, `legacy/`), `renv/` and hidden folders are exempt from the other checks. `kit lint_code.py --project . --all` counts a project's existing findings by file.
