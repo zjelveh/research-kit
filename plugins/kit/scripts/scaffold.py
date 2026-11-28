@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Create a research-kit project (`new`), attach its Overleaf clone (`attach-paper`), add a language or package
-(`add-language`, `add-package`), add the parameter files (`add-params`), start a talk (`new-talk`) and rewrite a
-project's git hooks (`install-hooks`). Specs: kit design §5.7, §5.8; languages and packages §3; code §6."""
+(`add-language`, `add-package`), add the parameter files (`add-params`), an R loader (`add-loader`) or the table
+writer (`add-tables`, in tables_add.py), start a talk (`new-talk`) and rewrite a project's git hooks
+(`install-hooks`). Specs: kit design §5.7, §5.8; languages and packages §3; code §6; table writer."""
 from __future__ import annotations
 
 import argparse
@@ -904,6 +905,13 @@ def main(argv: list[str] | None = None) -> int:
     ih.add_argument("--project", type=Path, default=Path.cwd())
     ap_ = sub.add_parser("add-params")
     ap_.add_argument("--project", type=Path, default=Path.cwd())
+    tb = sub.add_parser("add-tables", help="add the table writer to the library and its settings to params.yml")
+    tb.add_argument("lang", choices=LANGUAGES)
+    tb.add_argument("--into", help="the library folder to put it in, when several could hold it")
+    stars = tb.add_mutually_exclusive_group()
+    stars.add_argument("--stars", help="the star rule as marker:threshold pairs, e.g. '*:0.1,**:0.05,***:0.01'")
+    stars.add_argument("--no-stars", action="store_true", help="tables carry no significance stars")
+    tb.add_argument("--project", type=Path, default=Path.cwd())
     lo = sub.add_parser("add-loader")
     lo.add_argument("folder", help="an R library folder named in research.yml's library key")
     lo.add_argument("--project", type=Path, default=Path.cwd())
@@ -924,6 +932,9 @@ def main(argv: list[str] | None = None) -> int:
             cmd_add_params(a.project)
         elif a.cmd == "add-loader":
             cmd_add_loader(a.folder, a.project)
+        elif a.cmd == "add-tables":
+            from tables_add import cmd_add_tables
+            cmd_add_tables(a.lang, a.project, a.into, a.stars, a.no_stars)
         else:
             cmd_add_package(a.lang, a.project, a.name)
     except KitError as e:

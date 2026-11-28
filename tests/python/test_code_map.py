@@ -4,6 +4,7 @@ import pytest
 
 import code_map
 import code_scan
+import lint_code
 from build_fixture import CONFIG, git, minimal_project, write
 
 LIB_CONFIG = CONFIG + "library: [analysis/R, analysis/paths.py]\n"
@@ -440,3 +441,22 @@ def test_the_map_says_when_there_is_no_run_all_and_warns_about_missing_entries(t
     out = capsys.readouterr().out
     assert "pipeline: no run-all script (run_all.R, run_all.py, or run_all: in research.yml)" in out
     assert "no run-all script: name the scripts that run the pipeline" in out
+
+
+# Parameters a file reads by name (table writer spec).
+
+def test_a_file_that_reads_parameters_by_name_uses_the_names_it_quotes(project, capsys):
+    write(project / "analysis" / "R" / "style.R",
+          'SETTINGS <- c("min_group_size")\nstyle <- function(param) lapply(SETTINGS, function(n) param(n))\n')
+    write(project / "analysis" / "R" / "cols.R", 'seed_col <- function(d) d[["analysis_data"]]\n'
+          'x <- function() param("q_start")\n')
+    params = section(out_of(capsys, project), "Parameters")
+    assert "min_group_size = 20  pipeline:8  used in 1: analysis/R/style.R" in params
+    assert "analysis/R/cols.R" not in params.split("analysis_data")[1].split("\n")[0]
+
+
+def test_the_by_name_rule_in_python_and_r():
+    assert lint_code.reads_params_by_name("a.py", "for n in NAMES:\n    param(n)\n")
+    assert not lint_code.reads_params_by_name("a.py", 'param("x")\n# param(n)\n"param(n)"\n')
+    assert lint_code.reads_params_by_name("a.R", "v <- lapply(names, function(n) param(n))\n")
+    assert not lint_code.reads_params_by_name("a.R", 'param("x")  # param(n)\nparam_path( "y")\n')

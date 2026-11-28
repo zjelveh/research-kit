@@ -4,7 +4,8 @@
   personal.py which <item>        print the file in effect
   personal.py customize <item>    copy the default (or, for a new venue or idiom, a template) into the personal folder
   personal.py where                                                  print the personal folder
-  <item> is rules, writing-voice, writing-patterns, slides-style, figure-style, venue <name> or idiom <name>
+  <item> is rules, writing-voice, writing-patterns, slides-style, figure-style, table-style, venue <name> or
+  idiom <name>. table-style is read entry by entry: your copy's entries over the kit's (tables_add.py).
 
 Exit: 0 ok, 2 error.
 """
@@ -61,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
             print(personal_dir())
         elif a.item is None:
             raise KitError(f"{a.action} needs an item: rules, writing-voice, writing-patterns, slides-style, "
-                           "figure-style, venue <name> or idiom <name>")
+                           "figure-style, table-style, venue <name> or idiom <name>")
         elif a.action == "which":
             print(in_effect(a.item, a.name)[0])
         else:

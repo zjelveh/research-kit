@@ -181,6 +181,10 @@ def build(project: Path, near: str | None = None) -> dict:
         for n, name in lint_code.param_calls(f, text):
             by_line[n].add(name)
             users[name].add(f)
+        if lint_code.reads_params_by_name(f, text):   # a quoted name it may pass to param() counts as a use
+            for _, s in lits[f]:
+                if s in pipe or s in expl:
+                    users[s].add(f)
         for n, c in enumerate(code_lines, 1):
             names = {x for name in CALL.findall(c) for x in (name, name.rsplit(".", 1)[-1])}
             calls[f].update(names)

@@ -66,6 +66,7 @@ It lists the library's functions, with how many files call each one, the paramet
 - **Reading them:** R: `source("analysis/params.R")` (by its path from the script's working folder), then `param("min_group_size")`. Python: put the project's `analysis/` folder on `sys.path`, `from params import param, param_path`, then `param("min_group_size")`. The readers find the parameter files from their own place, so a script may run from any folder in the project, and a missing `analysis/params.yml` is an error, as is an unknown name. Read a path with `param_path("analysis_data")`, which joins it to the project root, so it works from any folder; `param()` returns the path as written.
 - **Changing a pipeline value** is shown as a before/after for approval, with the scripts the map lists as its users; then say which outputs are stale and rerun them. Adding a pipeline value is shown with the code that uses it.
 - **Design settings are parameters too,** when they are strings the check can't see: the clustering variable, the kernel, an estimator option. Put them in the pipeline file and read them with `param()`.
+- **Style is set once for the paper:** the look figures share and the `table_*` settings of the table writer (`/kit:numbers`). A figure or table gets its own entry only where it really differs, named for it, with a comment saying why, as an override of the paper-wide value, not a copy of every number an old script typed.
 
 ## 4. The library
 
@@ -89,6 +90,8 @@ Then:
   - when the copies give different results today, stop and ask which definition is right: that's a question about the definition, not a refactor.
 
   The check compares a new library function with every other one once local names and typed values are set aside, and blocks a near copy. A real difference ends the definition line with `# distinct: <reason>`, which review sees.
+
+  Moving an old figure or table onto the paper's style may change how it looks: show the user before and after renders for approval, instead of requiring the outputs to stay identical. Result files (CSVs, numbers, a table's values) still must not change.
 - **Changing what a library function does:** find its callers (the map's `callers` count, then a search for `name(`), run their tests, and tell the user which outputs are now stale.
 - **Two builders that must coexist,** such as a legacy panel kept for one output, get a test that they agree: keys, row counts and key columns.
 - **Scripts never assign to library variables;** they pass arguments.

@@ -93,7 +93,7 @@ To update: `claude plugin marketplace update research-kit`, then `claude plugin 
 
 In Claude Code, run `/kit:new-project <name>`. The first time, it runs `kit setup`, which creates a small Python environment in `~/.local/share/research-kit` (this needs uv). It then asks which languages the paper uses and which folder the project goes in, creates the project and walks you through attaching the Overleaf clone.
 
-Later, `kit scaffold.py add-language r|python` adds a language to the project, `add-package r|python` gives it its own package, and `install-hooks` reinstalls the commit hooks after the project folder moves.
+Later, `kit scaffold.py add-language r|python` adds a language to the project, `add-package r|python` gives it its own package, `add-tables r|python` adds the table writer, and `install-hooks` reinstalls the commit hooks after the project folder moves.
 
 ## A kit project
 
@@ -178,13 +178,15 @@ The paper's clone gets its own pre-commit hook, which runs two checks on what th
 - significance stars with no legend in the table;
 - a legend whose thresholds differ from what most of the paper's tables say.
 
+**The table writer** writes tables that pass these checks: `kit scaffold.py add-tables r|python --stars '*:0.1,**:0.05,***:0.01'` (or `--no-stars`) copies `tex_tables.R` or `tex_tables.py` into the project's library, where the project owns it, and appends the paper's table settings to `analysis/params.yml`: the star rule, decimals, thousands separator, brackets for standard errors and intervals, the p-value form, the notes and the table's size. Every number goes through one formatter with a real minus; stars and their legend come from the same thresholds; a p-value is never printed as zero or on the other side of a threshold. A driver builds the style once, `style <- table_style(param)`, and overrides a setting for one table by name (`table_style(param, size = "scriptsize")`). The writer uses base R or Python's standard library only, so the paper's replication code runs without the kit. Your usual settings for new papers go in `kit customize table-style`.
+
 A negative zero printed with a real minus (`$-$0.0`) and a table input the check can't find are warnings, not blocks; a negative zero printed with a hyphen (`-0.0`) blocks, as a hyphen. A line that has to keep a form ends with `%table-ok: <reason>`, and a table whose legend is given elsewhere carries `%legend-ok: <reason>`. `kit lint_tables.py --project . --report` lists where the paper mixes two forms of one thing, such as p-values with and without a leading zero, or captions with and without a final period. Which form to use is the project's choice; the report only shows the mix.
 
 **The ratchet.** Each check counts its findings in the whole paper and keeps the count in a baseline file: `.lint_baseline` for numbers, `.lint_baseline_tables` for tables. A commit that raises a count is blocked; a commit that lowers it lowers the baseline in the same commit (the table baseline holds while a table input is unresolved or a file can't be read). So an existing paper keeps committing from the day it's attached, and the counts only go down. `kit lint_numbers.py --project . --gate paper -v` and `kit lint_tables.py --project . -v` list the findings without committing.
 
 ## Changing the defaults
 
-Each default below is a file in the kit's `plugins/kit/defaults/` folder. `kit customize <item>` copies it into your personal folder, `~/.config/research-kit/`; edit the copy there. Your copy then replaces the default; the two are not merged. `kit which <item>` prints the file in effect, and `kit where` prints the personal folder.
+Each default below is a file in the kit's `plugins/kit/defaults/` folder. `kit customize <item>` copies it into your personal folder, `~/.config/research-kit/`; edit the copy there. Your copy then replaces the default; the two are not merged, except `table-style`, which is read entry by entry. `kit which <item>` prints the file in effect, and `kit where` prints the personal folder.
 
 | Item | What it sets | Command |
 |---|---|---|
@@ -193,6 +195,7 @@ Each default below is a file in the kit's `plugins/kit/defaults/` folder. `kit c
 | `writing-patterns` | How paragraphs and sections are built: results in words against the baseline, a synthesis after a series, the usual section sequence | `kit customize writing-patterns` |
 | `slides-style` | The slide conventions on top of the kit's fixed slide rules | `kit customize slides-style` |
 | `figure-style` | The colour, label and size conventions for figures | `kit customize figure-style` |
+| `table-style` | The table settings `add-tables` gives a new paper (star rule, decimals, brackets, notes); read entry by entry, so your copy may keep only what it changes | `kit customize table-style` |
 | `idiom <id>` | One idiom in the figures catalogue; a new id adds an idiom of your own | `kit customize idiom <id>` |
 | `venue <name>` | Rules for a target journal. The kit ships `undecided`; set a project's venue in its `.claude/research.yml` | `kit customize venue <name>` |
 

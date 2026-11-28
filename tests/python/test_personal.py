@@ -141,3 +141,17 @@ def test_figure_style_and_idioms_are_items():
 def test_writing_patterns_is_an_item():
     assert item_rel("writing-patterns") == Path("writing-patterns.md")
     assert in_effect("writing-patterns") == (DEFAULTS / "writing-patterns.md", "default")
+
+
+def test_table_style_is_an_item_read_entry_by_entry():
+    import tables_add
+    assert item_rel("table-style") == Path("table-style.yml")
+    assert in_effect("table-style") == (DEFAULTS / "table-style.yml", "default")
+    merged = tables_add.style_in_effect()
+    assert "table_star_thresholds" not in merged and merged["table_decimals"][0] == "3"
+    mine = personal_dir() / "table-style.yml"
+    mine.parent.mkdir(parents=True, exist_ok=True)
+    mine.write_text("# Mine.\ntable_decimals: 2\n")
+    assert in_effect("table-style") == (mine, "personal")
+    merged = tables_add.style_in_effect()
+    assert merged["table_decimals"] == ("2", ["# Mine."]) and merged["table_missing"][0] == "'---'"

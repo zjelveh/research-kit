@@ -16,7 +16,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 LIMITS_FILE = PLUGIN_ROOT / "limits.yml"
 DEFAULTS = PLUGIN_ROOT / "defaults"
 ITEM_FILES = {"rules": "rules.md", "writing-voice": "writing-voice.md", "writing-patterns": "writing-patterns.md",
-              "slides-style": "slides-style.md", "figure-style": "figure-style.md"}
+              "slides-style": "slides-style.md", "figure-style": "figure-style.md", "table-style": "table-style.yml"}
 NAMED_ITEMS = {"venue": "venues", "idiom": "idioms"}
 VENUE_RE = re.compile(r"[a-z0-9][a-z0-9_-]*")
 PERSONAL_CONFIG_KEYS = ("projects_root",)

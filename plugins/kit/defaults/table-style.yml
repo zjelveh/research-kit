@@ -1,0 +1,64 @@
+# The kit's default table style (research-kit). scaffold.py add-tables copies these table_* entries into a
+# project's analysis/params.yml, where the paper's tables read them; a project then changes them there. To set
+# your own usual values for every new paper, run `kit customize table-style` and edit your copy: each entry in
+# your copy replaces the kit's, and entries it lacks come from here. The same params format as params.yml.
+#
+# The star rule is not set here: add-tables asks for one (--stars or --no-stars) unless your copy has both
+#   table_star_thresholds: [0.1, 0.05, 0.01]
+#   table_star_markers: ['*', '**', '***']
+# Common rules: economics * 0.10, ** 0.05, *** 0.01; psychology and criminology * 0.05, ** 0.01, *** 0.001,
+# sometimes \dagger 0.10; AEA journals ask for no stars ([] and []). Markers: *, **, ***, \dagger, \ddagger.
+
+# Decimals for estimates, standard errors and intervals (a table or a call may override it)
+table_decimals: 3
+
+# Thousands separator, used from four integer digits up ('{,}' or '\,' also work; '' for none)
+table_thousands: ','
+
+# The brackets around a standard error
+table_se_brackets: ['(', ')']
+
+# The brackets around an interval
+table_interval_brackets: ['[', ']']
+
+# What separates an interval's two bounds
+table_interval_sep: ', '
+
+# Decimals for a p-value (more where rounding would put it on the other side of a star threshold, or at zero)
+table_p_decimals: 3
+
+# Below this a p-value prints as < the floor
+table_p_floor: 0.001
+
+# Whether p-values, the floor and the legend's thresholds keep their leading zero (0.03, or .03 in APA style)
+table_p_leading_zero: true
+
+# What an empty cell shows
+table_missing: '---'
+
+# The table's size, a size name without the backslash ('small', 'footnotesize'); '' for the text's size
+table_size: ''
+
+# Where LaTeX may place a table float
+table_placement: 'htbp'
+
+# Whether every caption must end with a period
+table_caption_period: false
+
+# What the notes under a table open with ('' for nothing)
+table_notes_lead: '\textit{Notes:}'
+
+# The notes' size, a size name without the backslash
+table_notes_size: 'footnotesize'
+
+# The notes' width, a LaTeX length
+table_notes_width: '\linewidth'
+
+# The space between a table and its notes, a LaTeX length
+table_notes_skip: '6pt'
+
+# Column padding, a LaTeX length ('' keeps LaTeX's)
+table_tabcolsep: ''
+
+# Row spacing, a factor such as '1.2' ('' keeps LaTeX's)
+table_arraystretch: ''

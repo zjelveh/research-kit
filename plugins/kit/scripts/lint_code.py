@@ -58,6 +58,7 @@ FORMAT = re.compile(r"%[-+ #0]*\d*(?:\.\d+)?[a-zA-Z]")
 DIFF = ("diff", "--no-ext-diff", "--no-color", "--no-textconv", "--text", "--inter-hunk-context=0", "-U0", "-M")
 CODE_PATHS = ("*.R", "*.r", "*.py")
 PARAM_CALL = re.compile(r"(?<![\w.])param(?:_path)?\(\s*[\"']([^\"']*)[\"']\s*\)")
+PARAM_BY_NAME = re.compile(r"(?<![\w.])param(?:_path)?\(\s*[A-Za-z.]")
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", re.M)
 NEAR = " is a near copy of "
 FINDING = re.compile(r"(.*?):\d+: ")
@@ -168,6 +169,18 @@ def r_literals(text: str, package: bool) -> list[tuple[int, str, object]]:
             continue
         out.append((n, "number", v))
     return out
+
+
+def reads_params_by_name(rel: str, text: str) -> bool:
+    """Whether the file calls param() or param_path() with something other than a quoted name (a loop over names,
+    as the table writer's table_style() does): then a quoted parameter name in it counts as a use (code map)."""
+    if rel.endswith(".py"):
+        tree = parse_python(text)
+        return tree is not None and any(
+            isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("param", "param_path")
+            and n.args and not (isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str))
+            for n in ast.walk(tree))
+    return any(PARAM_BY_NAME.search(split_comment(line)[0]) for line in lines_of(text))
 
 
 def param_calls(rel: str, text: str) -> list[tuple[int, str]]:
@@ -300,9 +313,13 @@ def library_texts(project: Path, cfg: dict, library: list[str], rev: str | None)
 
 
 def _hints(pipe: dict, expl: dict) -> dict:
+    """Typed values that are a parameter's value, for the hint; the table writer's settings (table_*) are left
+    out, so an unrelated 3 or 0.05 isn't pointed at a table setting."""
     out = {}
     for entries in (expl, pipe):              # pipeline names win
         for name, (value, _, _) in entries.items():
+            if name.startswith("table_"):
+                continue
             for v in value if isinstance(value, list) else [value]:
                 if isinstance(v, (int, float, str)) and not isinstance(v, bool):
                     out[v] = name

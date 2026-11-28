@@ -396,6 +396,8 @@ def paper_unmade(project: Path, cfg: dict, texts: dict[str, str], g: Graph) -> l
         named = sorted((f, n) for f, st in g.stmts.items() for n, c in st if quoted.search(c))
         if any(f in g.run and g.cls[f] not in ("test", "archive") for f, _ in named):
             continue
+        if made_by_pipeline(g, p.relative_to(root).as_posix()):   # written through a path parameter
+            continue
         out.append(Unmade(p.relative_to(root).as_posix(), [("paper", 0)], named))
     return out
 

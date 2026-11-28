@@ -230,3 +230,15 @@ def test_many_held_variables_stay_fast():
     start = time.time()
     reads, _, _ = uses(text)
     assert reads == {"out/f7.csv": [1501]} and time.time() - start < 5
+
+
+def test_a_paper_table_written_through_a_path_parameter_is_made_by_the_pipeline(tmp_path):
+    p = minimal_project(tmp_path, CONFIG)
+    write(p / "paper" / "main.tex", "\\input{tables/balance}\n\\input{tables/other}\n")
+    for name in ("tables/balance.tex", "tables/other.tex"):
+        write(p / "paper" / name, "x\n")
+    files = {"run_all.py": 'import subprocess\nsubprocess.run(["python", "make_tab.py"])\n',
+             "make_tab.py": 'write_tex(tex_table("lc", rows, style), param_path("balance_tex"))\n'}
+    g = pipeline.graph(files, ["run_all.py"], [], {"balance_tex": "paper/tables/balance.tex"})
+    found = {x.name for x in pipeline.paper_unmade(p, pipeline_cfg(), files, g)}
+    assert found == {"paper/tables/other.tex"}

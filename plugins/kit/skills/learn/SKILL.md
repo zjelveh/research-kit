@@ -22,6 +22,7 @@ A correction about the current task is not a lesson. Record a standing rule only
 | Paragraph or section structure | the writing patterns: `"${CLAUDE_PLUGIN_ROOT}/bin/kit" which writing-patterns` |
 | Slide conventions | `"${CLAUDE_PLUGIN_ROOT}/bin/kit" which slides-style` |
 | Figure conventions | `"${CLAUDE_PLUGIN_ROOT}/bin/kit" which figure-style` |
+| Table settings a new paper starts from (star rule, decimals, brackets) | `"${CLAUDE_PLUGIN_ROOT}/bin/kit" which table-style` |
 | Specific to a venue | `"${CLAUDE_PLUGIN_ROOT}/bin/kit" which venue <venue>` |
 | How a kit procedure works | the kit skill `${CLAUDE_PLUGIN_ROOT}/skills/<stream>/SKILL.md`, only when the kit folder is a git checkout (section 4) |
 | Specific to a project | `${CLAUDE_PROJECT_DIR}/CLAUDE.md`, or `state/DECISIONS.md` for a decision |
@@ -29,7 +30,7 @@ A correction about the current task is not a lesson. Record a standing rule only
 - **When the level is unclear, default to project.** A wrong global rule affects every project.
 - Always-on rules cost context in every session of every project; propose that level only for a rule that applies to nearly every task.
 - A decision (a choice among alternatives for this paper) goes to `state/DECISIONS.md` in the `### D-NNN — Title (YYYY-MM-DD)` format with **Decision**, **Rejected** and **Rationale**, followed by `decisions_index.py` (see `/kit:checkpoint`).
-- The first six levels are personal files. When `kit which` prints a path in the kit's `defaults/` folder, first run `"${CLAUDE_PLUGIN_ROOT}/bin/kit" customize <item>` (for a venue, `customize venue <name>`), which copies the default into the personal folder, and edit that copy. Never edit the kit's `defaults/` for a lesson. A venue the kit doesn't have is created the same way.
+- The first seven levels are personal files. When `kit which` prints a path in the kit's `defaults/` folder, first run `"${CLAUDE_PLUGIN_ROOT}/bin/kit" customize <item>` (for a venue, `customize venue <name>`), which copies the default into the personal folder, and edit that copy. Never edit the kit's `defaults/` for a lesson. A venue the kit doesn't have is created the same way. The table style is read entry by entry: the settings in effect are the personal file's entries over the kit's, so a personal copy may keep only the entries it changes. It applies when the table writer is added to a project (`add-tables`); a project's own settings are in its `analysis/params.yml`.
 
 Propose the level with a one-line reason. The user decides.
 

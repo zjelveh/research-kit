@@ -59,7 +59,7 @@ def test_supporting_files_have_no_plugin_variables():
 
 def test_defaults_exist_and_carry_no_personal_lines():
     d = KIT / "plugins" / "kit" / "defaults"
-    for rel in ("rules.md", "writing-voice.md", "writing-patterns.md", "slides-style.md", "figure-style.md",
+    for rel in ("rules.md", "writing-voice.md", "writing-patterns.md", "slides-style.md", "figure-style.md", "table-style.yml",
                 "venues/undecided.md"):
         text = (d / rel).read_text()
         assert not any(b in text for b in PRIVATE), rel

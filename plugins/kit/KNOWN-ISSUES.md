@@ -188,3 +188,13 @@ The gate blocks a new library function that is 95% or more alike another library
 - **Committing from a worktree of the paper clone:** git points the hook at the worktree's index and HEAD, so the worktree's staged files and baseline are checked. A new or lowered baseline is written to the main clone's file and staged from there, so the worktree's `.lint_baseline_tables` shows as modified (and the main clone's file may change). The numbers check does the same.
 - **A commit of named paths** (`git commit <paths>`) leaves a baseline the hook set or lowered out of the real index; `/kit:numbers` says how to stage it. This was already true of the numbers check's `.lint_baseline`.
 - **Session start doesn't report table counts.** A table edited on Overleaf first shows up as a blocked local commit.
+
+## Table writer (`tex_tables.R`/`.py`, `tables_add.py`)
+
+- **No alignment on the decimal point.** Cells are plain text in `l`, `c` or `r` columns. siunitx `S` and dcolumn `D` columns set their own minus, and the table check skips their cells.
+- **R and Python give the same text** in the tests, on Linux. R prints with the C library's `printf`, Python with its own correctly rounded routine; a platform whose C library rounds differently could differ in the last digit.
+- **A negative interval bound within 5e-7 of zero** prints `$-$0.000000`, the most decimals the writer gives; the table check then warns about a negative zero (a warning, not counted).
+- **A float's legend is found by the markers the writer prints** (`$^{**}$`). A marker typed into a row in another form gets no legend from the writer; the table check still catches it.
+- **`add-tables` checks R name clashes by top-level assignments at the start of a line** in the R library folders. A name assigned another way (`assign()`, `->`, a backticked name, inside `local()`) isn't seen, and a named argument that starts a line inside a multi-line call is read as an assignment.
+- **`add-tables` lays out a `NAMESPACE` as roxygen writes it** only when roxygen wrote it (its header line, one directive per line); any other `NAMESPACE` gets the new `export()` lines at its end.
+- **The code map counts a quoted parameter name as used** in a file that calls `param()` or `param_path()` with a non-literal argument, as the writer does; in such a file, a string that merely equals a parameter's name also counts.

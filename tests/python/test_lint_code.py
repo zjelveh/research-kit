@@ -729,3 +729,11 @@ def test_a_folder_that_looks_like_an_index_stage_is_read(project, capsys):
     stage(project, "0:old/archive/x.R", "library(zoo)\n")
     stage(project, "0:old/archive/.renvignore", "*\n")
     assert gate(project, capsys) == (0, "")
+
+
+def test_table_settings_give_no_hints(project, capsys):
+    stage(project, "analysis/params.yml", PARAMS + "# Decimals in tables.\ntable_decimals: 3\n")
+    stage(project, "analysis/run.py", "k = 3\nok = n >= 20\n")
+    _, out = gate(project, capsys)
+    assert "analysis/run.py:1: typed number 3\n" in out + "\n" and "param('table_decimals')" not in out
+    assert "typed number 20 (it is param('min_group_size'))" in out
